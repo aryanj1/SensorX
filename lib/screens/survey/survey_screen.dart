@@ -71,6 +71,34 @@ class _SurveyScreenState extends State<SurveyScreen> {
   }
 
   // ---------------------------------------------------------------------------
+  // Delete measurement confirmation
+  // ---------------------------------------------------------------------------
+
+  Future<void> _confirmDeleteMeasurement(Measurement m) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Measurement'),
+        content: Text("Delete '${m.name}'? All readings will be deleted."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final db = await DatabaseService.instance();
+    await db.deleteMeasurement(m.id!);
+    await _loadMeasurements();
+  }
+
+  // ---------------------------------------------------------------------------
   // New measurement dialog
   // ---------------------------------------------------------------------------
 
@@ -209,6 +237,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
               ),
             );
           },
+          onDelete: () => _confirmDeleteMeasurement(_measurements[index]),
         );
       },
     );

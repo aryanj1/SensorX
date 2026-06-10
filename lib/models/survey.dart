@@ -2,6 +2,7 @@ class Survey {
   final int? id;
   final String name;
   final String surveyorName;
+  final int? surveyorId;
   final String createdAt;
   final String? deviceId;
   final String? deviceName;
@@ -10,6 +11,7 @@ class Survey {
     this.id,
     required this.name,
     required this.surveyorName,
+    this.surveyorId,
     required this.createdAt,
     this.deviceId,
     this.deviceName,
@@ -20,6 +22,7 @@ class Survey {
       id: map['id'] as int?,
       name: map['name'] as String,
       surveyorName: map['surveyor_name'] as String,
+      surveyorId: map['surveyor_id'] as int?,
       createdAt: map['created_at'] as String,
       deviceId: map['device_id'] as String?,
       deviceName: map['device_name'] as String?,
@@ -30,6 +33,7 @@ class Survey {
     final m = <String, dynamic>{
       'name': name,
       'surveyor_name': surveyorName,
+      'surveyor_id': surveyorId,
       'created_at': createdAt,
       'device_id': deviceId,
       'device_name': deviceName,
@@ -42,6 +46,7 @@ class Survey {
     int? id,
     String? name,
     String? surveyorName,
+    int? surveyorId,
     String? createdAt,
     String? deviceId,
     String? deviceName,
@@ -50,6 +55,7 @@ class Survey {
       id: id ?? this.id,
       name: name ?? this.name,
       surveyorName: surveyorName ?? this.surveyorName,
+      surveyorId: surveyorId ?? this.surveyorId,
       createdAt: createdAt ?? this.createdAt,
       deviceId: deviceId ?? this.deviceId,
       deviceName: deviceName ?? this.deviceName,

@@ -4,17 +4,16 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:blu/app.dart';
-import 'package:blu/models/survey.dart';
+import 'package:blu/models/surveyor.dart';
 import 'package:blu/services/ble_state.dart';
 import 'package:blu/services/cache_service.dart';
 import 'package:blu/services/database_service.dart';
-import 'package:blu/services/settings_service.dart';
 import 'package:blu/screens/files/pending_files_screen.dart';
 import 'package:blu/screens/measurement/measurement_screen.dart';
-import 'package:blu/screens/survey/survey_screen.dart';
+import 'package:blu/screens/surveyor/surveyor_screen.dart';
 
 // ---------------------------------------------------------------------------
-// HomeScreen — survey list + navigation hub
+// HomeScreen — surveyor list + navigation hub
 // ---------------------------------------------------------------------------
 
 class HomeScreen extends StatefulWidget {
@@ -25,8 +24,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  List<Survey> _surveys = [];
-  String _surveyorName = 'Not Defined';
+  List<Surveyor> _surveyors = [];
   bool _loading = true;
   bool _cacheReady = false;
   TTLFileCache? _cache;
@@ -66,62 +64,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadData() async {
     final db = await DatabaseService.instance();
-    final results = await Future.wait([
-      db.getAllSurveys(),
-      SettingsService.getSurveyorName(),
-    ]);
+    final results = await db.getAllSurveyors();
     if (!mounted) return;
     setState(() {
-      _surveys = results[0] as List<Survey>;
-      _surveyorName = results[1] as String;
+      _surveyors = results;
       _loading = false;
     });
   }
 
   // ---------------------------------------------------------------------------
-  // Surveyor name edit dialog
+  // New surveyor dialog
   // ---------------------------------------------------------------------------
 
-  Future<void> _editSurveyorName() async {
-    final controller = TextEditingController(text: _surveyorName);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit Surveyor Name'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Surveyor name'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      final newName = controller.text.trim().isEmpty
-          ? 'Not Defined'
-          : controller.text.trim();
-      await SettingsService.setSurveyorName(newName);
-      if (!mounted) return;
-      setState(() => _surveyorName = newName);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // New survey dialog
-  // ---------------------------------------------------------------------------
-
-  Future<void> _showNewSurveyDialog() async {
+  Future<void> _showNewSurveyorDialog() async {
     final nameController = TextEditingController();
-    final surveyorController = TextEditingController(text: _surveyorName);
     String? nameError;
 
     await showDialog<void>(
@@ -130,25 +86,14 @@ class _HomeScreenState extends State<HomeScreen> {
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return AlertDialog(
-              title: const Text('New Survey'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      labelText: 'Survey name *',
-                      errorText: nameError,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: surveyorController,
-                    decoration:
-                        const InputDecoration(labelText: 'Surveyor name'),
-                  ),
-                ],
+              title: const Text('New Surveyor'),
+              content: TextField(
+                controller: nameController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'Surveyor name *',
+                  errorText: nameError,
+                ),
               ),
               actions: [
                 TextButton(
@@ -162,15 +107,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       setDialogState(() => nameError = 'Name is required');
                       return;
                     }
-                    final surveyor = surveyorController.text.trim().isEmpty
-                        ? 'Not Defined'
-                        : surveyorController.text.trim();
                     final db = await DatabaseService.instance();
-                    await db.insertSurvey(Survey(
-                      name: name,
-                      surveyorName: surveyor,
-                      createdAt: DateTime.now().toUtc().toIso8601String(),
-                    ));
+                    await db.insertSurveyor(Surveyor(name: name));
                     if (!ctx.mounted) return;
                     Navigator.pop(ctx);
                     await _loadData();
@@ -183,6 +121,36 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Delete surveyor confirmation
+  // ---------------------------------------------------------------------------
+
+  Future<void> _confirmDeleteSurveyor(Surveyor s) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Surveyor'),
+        content: Text(
+          "Delete '${s.name}'? All surveys, measurements and readings will be deleted.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final db = await DatabaseService.instance();
+    await db.deleteSurveyor(s.id!);
+    _loadData();
   }
 
   // ---------------------------------------------------------------------------
@@ -230,24 +198,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Surveyor name row
-          ListTile(
-            leading: const Icon(Icons.person),
-            title: Text('Surveyor: $_surveyorName'),
-            trailing: const Icon(Icons.edit, size: 18),
-            onTap: _editSurveyorName,
-          ),
-          const Divider(height: 1),
-          // Survey list
-          Expanded(child: _buildBody()),
-        ],
-      ),
+      body: _buildBody(),
       floatingActionButton: FloatingActionButton(
-        onPressed: _showNewSurveyDialog,
-        tooltip: 'New survey',
+        onPressed: _showNewSurveyorDialog,
+        tooltip: 'New surveyor',
         child: const Icon(Icons.add),
       ),
     );
@@ -257,27 +211,34 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_surveys.isEmpty) {
+    if (_surveyors.isEmpty) {
       return const Center(
-        child: Text('No surveys yet. Tap + to create one.'),
+        child: Text('No surveyors yet. Tap + to add one.'),
       );
     }
     return ListView.builder(
-      itemCount: _surveys.length,
+      itemCount: _surveyors.length,
       itemBuilder: (context, index) {
-        final survey = _surveys[index];
+        final s = _surveyors[index];
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           child: ListTile(
-            title: Text(survey.name),
-            subtitle: Text(survey.createdAt),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => SurveyScreen(survey: survey, cache: _cache),
-              ),
+            leading: const CircleAvatar(child: Icon(Icons.person)),
+            title: Text(s.name),
+            trailing: IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Delete surveyor',
+              onPressed: () => _confirmDeleteSurveyor(s),
             ),
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SurveyorScreen(surveyor: s, cache: _cache),
+                ),
+              );
+              _loadData();
+            },
           ),
         );
       },

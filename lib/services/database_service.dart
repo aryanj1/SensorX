@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:blu/models/measurement.dart';
 import 'package:blu/models/reading.dart';
 import 'package:blu/models/survey.dart';
+import 'package:blu/models/surveyor.dart';
 
 class DatabaseService {
   DatabaseService._();
@@ -23,8 +24,9 @@ class DatabaseService {
     final path = p.join(dbPath, 'blu_surveys.db');
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
       onOpen: _onOpen,
     );
   }
@@ -35,10 +37,18 @@ class DatabaseService {
 
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
+      CREATE TABLE surveyors (
+        id   INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE
+      )
+    ''');
+
+    await db.execute('''
       CREATE TABLE surveys (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         name          TEXT NOT NULL,
         surveyor_name TEXT NOT NULL,
+        surveyor_id   INTEGER REFERENCES surveyors(id) ON DELETE CASCADE,
         created_at    TEXT NOT NULL,
         device_id     TEXT,
         device_name   TEXT
@@ -70,7 +80,106 @@ class DatabaseService {
     ''');
   }
 
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Step 1: create surveyors table
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS surveyors (
+          id   INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE
+        )
+      ''');
+
+      // Step 2: add surveyor_id column to surveys
+      await db.execute(
+        'ALTER TABLE surveys ADD COLUMN surveyor_id INTEGER REFERENCES surveyors(id)',
+      );
+
+      // Step 3: treat NULL/empty surveyor_name as 'Not Defined'
+      await db.execute(
+        "UPDATE surveys SET surveyor_name = 'Not Defined' "
+        "WHERE surveyor_name IS NULL OR surveyor_name = ''",
+      );
+
+      // Step 4: insert one surveyor row per distinct surveyor_name
+      await db.execute(
+        'INSERT OR IGNORE INTO surveyors (name) '
+        'SELECT DISTINCT surveyor_name FROM surveys',
+      );
+
+      // Step 5: back-fill surveyor_id
+      await db.execute(
+        'UPDATE surveys '
+        'SET surveyor_id = (SELECT id FROM surveyors WHERE surveyors.name = surveys.surveyor_name) '
+        'WHERE surveyor_id IS NULL',
+      );
+    }
+  }
+
   Database get _database => _db!;
+
+  // ---------------------------------------------------------------------------
+  // Surveyor CRUD
+  // ---------------------------------------------------------------------------
+
+  Future<int> insertSurveyor(Surveyor surveyor) async {
+    return _database.insert('surveyors', {'name': surveyor.name});
+  }
+
+  Future<List<Surveyor>> getAllSurveyors() async {
+    final rows = await _database.query(
+      'surveyors',
+      orderBy: 'name ASC',
+    );
+    return rows.map(Surveyor.fromMap).toList();
+  }
+
+  Future<List<Survey>> getSurveysForSurveyor(int surveyorId) async {
+    final rows = await _database.query(
+      'surveys',
+      where: 'surveyor_id = ?',
+      whereArgs: [surveyorId],
+      orderBy: 'created_at DESC',
+    );
+    return rows.map(Survey.fromMap).toList();
+  }
+
+  Future<void> deleteSurveyor(int id) async {
+    // Manually cascade because ALTER TABLE ADD COLUMN cannot carry ON DELETE CASCADE.
+    final db = _database;
+    await db.transaction((txn) async {
+      // Find all survey ids belonging to this surveyor so we can cascade to measurements/readings.
+      final surveyRows = await txn.query(
+        'surveys',
+        columns: ['id'],
+        where: 'surveyor_id = ?',
+        whereArgs: [id],
+      );
+      for (final row in surveyRows) {
+        final surveyId = row['id'] as int;
+        final measurementRows = await txn.query(
+          'measurements',
+          columns: ['id'],
+          where: 'survey_id = ?',
+          whereArgs: [surveyId],
+        );
+        for (final mRow in measurementRows) {
+          await txn.delete(
+            'readings',
+            where: 'measurement_id = ?',
+            whereArgs: [mRow['id']],
+          );
+        }
+        await txn.delete(
+          'measurements',
+          where: 'survey_id = ?',
+          whereArgs: [surveyId],
+        );
+      }
+      await txn.delete('surveys', where: 'surveyor_id = ?', whereArgs: [id]);
+      await txn.delete('surveyors', where: 'id = ?', whereArgs: [id]);
+    });
+  }
 
   // ---------------------------------------------------------------------------
   // Survey CRUD

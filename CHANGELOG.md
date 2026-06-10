@@ -7,6 +7,13 @@ Format follows: Added, Changed, Fixed, Known Issues.
 ## Unreleased
 
 ### Added
+- Surveyor-first navigation (Home → Surveyors → Surveys → Measurements): `HomeScreen` now shows surveyor cards with a person icon instead of a direct survey list. New `SurveyorScreen` (`lib/screens/surveyor/surveyor_screen.dart`) lists surveys scoped to the selected surveyor.
+- `Surveyor` model (`lib/models/surveyor.dart`) with `id`, `name`, `fromMap`/`toMap`/`copyWith`.
+- `DatabaseService` v2: new `surveyors` table, `insertSurveyor`/`getAllSurveyors`/`getSurveysForSurveyor`/`deleteSurveyor` methods. `deleteSurveyor` uses a transaction to manually cascade to surveys → measurements → readings (required because `ALTER TABLE ADD COLUMN` cannot carry `ON DELETE CASCADE`).
+- DB v1→v2 migration in `_onUpgrade`: creates `surveyors` table, adds `surveyor_id` FK column to `surveys`, back-fills from distinct `surveyor_name` values. Existing data is preserved; `NULL`/empty names default to `'Not Defined'`.
+- Delete surveyors, surveys, and measurements — all with confirmation dialogs. Deleting a surveyor cascades to all child data.
+- `Survey` model: added `surveyorId` field (nullable, backward-compatible with v1 rows).
+- `MeasurementCard`: optional `onDelete` callback renders a delete icon button when provided.
 - CSV share sheet (`share_plus: ^10.1.4`) — after export succeeds, native Android share sheet opens so the CSV can be sent to email, Google Drive, WhatsApp, etc. Export failures still show a SnackBar.
 - Task 6: `ExportService.buildCsv(surveyId)` (`lib/services/export_service.dart`) — generates one CSV per survey combining all measurements' SQLite readings. Header: `GPS UTC,Measurement Name,Error Code,Methane (ppm),Ethane (ppm),Latitude,Longitude`. Filename: `survey_{safe_name}_{YYYYMMDD_HHmmss}.csv`. Saved to `getApplicationDocumentsDirectory()`. Throws plain string on empty survey; no raw SQL in service.
 - Task 6: `SurveyScreen` — `Icons.download` AppBar button calls `ExportService.buildCsv` and shows file path (or error) in a `SnackBar`. No crash on empty survey.

@@ -7,12 +7,14 @@ class MeasurementCard extends StatelessWidget {
   final Measurement measurement;
   final VoidCallback? onTap;
   final VoidCallback? onViewReadings;
+  final VoidCallback? onDelete;
 
   const MeasurementCard({
     super.key,
     required this.measurement,
     this.onTap,
     this.onViewReadings,
+    this.onDelete,
   });
 
   @override
@@ -34,6 +36,12 @@ class MeasurementCard extends StatelessWidget {
               tooltip: 'View logged readings',
               onPressed: onViewReadings,
             ),
+            if (onDelete != null)
+              IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: 'Delete',
+                onPressed: onDelete,
+              ),
           ],
         ),
         onTap: onTap,
