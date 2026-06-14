@@ -7,6 +7,16 @@ Format follows: Added, Changed, Fixed, Known Issues.
 ## Unreleased
 
 ### Added
+- UI polish: bold page headers added to Surveyors, Surveys, and Measurements list screens — "Surveyors" / "Surveys" / "Measurements" in `headlineSmall` bold, rendered above the list inside the body (loading and empty-state views unaffected).
+- App renamed to "X-Survey" in all user-facing locations: `MaterialApp.title`, AppBar title on HomeScreen, `android:label` in AndroidManifest, `CFBundleDisplayName`/`CFBundleName` in Info.plist. Internal package name `blu` and all import paths unchanged.
+- Week 2 Task 1: Photo/video capture during active measurements. `MeasurementScreen` gains Photo and Video buttons (visible when a measurement is selected) that call `image_picker` and are gated — tapping while not `active` shows a SnackBar; capture only triggers when status is `active`.
+- `MediaFile` model (`lib/models/media_file.dart`): `id`, `measurementId`, `path`, `type` (photo/video), `timestamp`, `latitude?`, `longitude?` — with `fromMap`/`toMap`/`copyWith`.
+- `DatabaseService` v3: new `media_files` table with `ON DELETE CASCADE` on `measurement_id`. DB v2→v3 migration adds the table without touching existing data. New methods: `insertMediaFile`, `getMediaFilesForMeasurement`, `getMediaFilesForSurvey`.
+- Captured media stored at `{appDocumentsDir}/survey_{surveyId}/measurement_{measurementId}/` and linked to the correct measurement via `measurement_id` in SQLite.
+- `ExportService.exportSurveyZip(surveyId)`: assembles a ZIP from the survey CSV + all media files + a `media.csv` metadata file using `flutter_archive`. ZIP filename: `survey_{name}_{YYYYMMDD}_{HHmmss}.zip`. Handles: readings-only (CSV-only ZIP), no data at all (error SnackBar), missing media files on disk (skipped gracefully).
+- "Share ZIP" button (`Icons.archive_outlined`) added to `SurveyScreen` AppBar alongside the existing "Share CSV" button.
+- Android permissions: `CAMERA`, `RECORD_AUDIO`, `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`.
+- iOS usage descriptions: `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, `NSPhotoLibraryUsageDescription`.
 - Surveyor-first navigation (Home → Surveyors → Surveys → Measurements): `HomeScreen` now shows surveyor cards with a person icon instead of a direct survey list. New `SurveyorScreen` (`lib/screens/surveyor/surveyor_screen.dart`) lists surveys scoped to the selected surveyor.
 - `Surveyor` model (`lib/models/surveyor.dart`) with `id`, `name`, `fromMap`/`toMap`/`copyWith`.
 - `DatabaseService` v2: new `surveyors` table, `insertSurveyor`/`getAllSurveyors`/`getSurveysForSurveyor`/`deleteSurveyor` methods. `deleteSurveyor` uses a transaction to manually cascade to surveys → measurements → readings (required because `ALTER TABLE ADD COLUMN` cannot carry `ON DELETE CASCADE`).

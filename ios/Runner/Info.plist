@@ -2,7 +2,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Blu</string>
+	<string>X-Survey</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -10,7 +10,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>blu</string>
+	<string>X-Survey</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -52,5 +52,11 @@
 	<string>We use your location to assist BLE functionality and display coordinates.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>This app uses your location for BLE scanning and mapping purposes.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>This app uses the camera to capture GPS-tagged photos and videos during gas surveys.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>This app records audio when capturing video during gas surveys.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>This app saves survey photos and videos to your photo library.</string>
 
 </dict>

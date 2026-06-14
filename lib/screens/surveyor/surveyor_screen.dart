@@ -73,12 +73,14 @@ class _SurveyorScreenState extends State<SurveyorScreen> {
                       return;
                     }
                     final db = await DatabaseService.instance();
-                    await db.insertSurvey(Survey(
-                      name: name,
-                      surveyorName: widget.surveyor.name,
-                      surveyorId: widget.surveyor.id,
-                      createdAt: DateTime.now().toUtc().toIso8601String(),
-                    ));
+                    await db.insertSurvey(
+                      Survey(
+                        name: name,
+                        surveyorName: widget.surveyor.name,
+                        surveyorId: widget.surveyor.id,
+                        createdAt: DateTime.now().toUtc().toIso8601String(),
+                      ),
+                    );
                     if (!ctx.mounted) return;
                     Navigator.pop(ctx);
                     await _loadSurveys();
@@ -130,9 +132,7 @@ class _SurveyorScreenState extends State<SurveyorScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.surveyor.name),
-      ),
+      appBar: AppBar(title: Text(widget.surveyor.name)),
       body: _buildBody(),
       floatingActionButton: FloatingActionButton(
         onPressed: _showNewSurveyDialog,
@@ -147,45 +147,59 @@ class _SurveyorScreenState extends State<SurveyorScreen> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_surveys.isEmpty) {
-      return const Center(
-        child: Text('No surveys yet. Tap + to add one.'),
-      );
+      return const Center(child: Text('No surveys yet. Tap + to add one.'));
     }
-    return ListView.builder(
-      itemCount: _surveys.length,
-      itemBuilder: (context, index) {
-        final survey = _surveys[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: ListTile(
-            title: Text(survey.name),
-            subtitle: Text(survey.createdAt),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.chevron_right),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  tooltip: 'Delete survey',
-                  onPressed: () => _confirmDeleteSurvey(survey),
-                ),
-              ],
-            ),
-            onTap: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SurveyScreen(
-                    survey: _surveys[index],
-                    cache: widget.cache,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Text(
+            'Surveys',
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: _surveys.length,
+            itemBuilder: (context, index) {
+              final survey = _surveys[index];
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: ListTile(
+                  title: Text(survey.name),
+                  subtitle: Text(survey.createdAt),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.chevron_right),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: 'Delete survey',
+                        onPressed: () => _confirmDeleteSurvey(survey),
+                      ),
+                    ],
                   ),
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => SurveyScreen(
+                          survey: _surveys[index],
+                          cache: widget.cache,
+                        ),
+                      ),
+                    );
+                    await _loadSurveys();
+                  },
                 ),
               );
-              await _loadSurveys();
             },
           ),
-        );
-      },
+        ),
+      ],
     );
   }
 }

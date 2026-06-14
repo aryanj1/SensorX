@@ -2,6 +2,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 import 'package:blu/models/measurement.dart';
+import 'package:blu/models/media_file.dart';
 import 'package:blu/models/reading.dart';
 import 'package:blu/models/survey.dart';
 import 'package:blu/models/surveyor.dart';
@@ -24,7 +25,7 @@ class DatabaseService {
     final path = p.join(dbPath, 'blu_surveys.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
@@ -78,6 +79,18 @@ class DatabaseService {
         longitude       REAL
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE media_files (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        measurement_id  INTEGER NOT NULL REFERENCES measurements(id) ON DELETE CASCADE,
+        path            TEXT NOT NULL,
+        type            TEXT NOT NULL,
+        timestamp       TEXT NOT NULL,
+        latitude        REAL,
+        longitude       REAL
+      )
+    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -114,6 +127,20 @@ class DatabaseService {
         'WHERE surveyor_id IS NULL',
       );
     }
+
+    if (oldVersion < 3) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS media_files (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          measurement_id  INTEGER NOT NULL REFERENCES measurements(id) ON DELETE CASCADE,
+          path            TEXT NOT NULL,
+          type            TEXT NOT NULL,
+          timestamp       TEXT NOT NULL,
+          latitude        REAL,
+          longitude       REAL
+        )
+      ''');
+    }
   }
 
   Database get _database => _db!;
@@ -127,10 +154,7 @@ class DatabaseService {
   }
 
   Future<List<Surveyor>> getAllSurveyors() async {
-    final rows = await _database.query(
-      'surveyors',
-      orderBy: 'name ASC',
-    );
+    final rows = await _database.query('surveyors', orderBy: 'name ASC');
     return rows.map(Surveyor.fromMap).toList();
   }
 
@@ -190,10 +214,7 @@ class DatabaseService {
   }
 
   Future<List<Survey>> getAllSurveys() async {
-    final rows = await _database.query(
-      'surveys',
-      orderBy: 'created_at DESC',
-    );
+    final rows = await _database.query('surveys', orderBy: 'created_at DESC');
     return rows.map(Survey.fromMap).toList();
   }
 
@@ -219,11 +240,7 @@ class DatabaseService {
   }
 
   Future<int> deleteSurvey(int id) async {
-    return _database.delete(
-      'surveys',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    return _database.delete('surveys', where: 'id = ?', whereArgs: [id]);
   }
 
   // ---------------------------------------------------------------------------
@@ -266,11 +283,7 @@ class DatabaseService {
   }
 
   Future<int> deleteMeasurement(int id) async {
-    return _database.delete(
-      'measurements',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    return _database.delete('measurements', where: 'id = ?', whereArgs: [id]);
   }
 
   // ---------------------------------------------------------------------------
@@ -305,5 +318,36 @@ class DatabaseService {
       [measurementId],
     );
     return (result.first['cnt'] as int?) ?? 0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // MediaFile CRUD
+  // ---------------------------------------------------------------------------
+
+  Future<int> insertMediaFile(MediaFile file) async {
+    return _database.insert('media_files', file.toMap());
+  }
+
+  Future<List<MediaFile>> getMediaFilesForMeasurement(int measurementId) async {
+    final rows = await _database.query(
+      'media_files',
+      where: 'measurement_id = ?',
+      whereArgs: [measurementId],
+      orderBy: 'id ASC',
+    );
+    return rows.map(MediaFile.fromMap).toList();
+  }
+
+  Future<List<MediaFile>> getMediaFilesForSurvey(int surveyId) async {
+    final rows = await _database.rawQuery(
+      '''
+      SELECT mf.* FROM media_files mf
+      INNER JOIN measurements m ON mf.measurement_id = m.id
+      WHERE m.survey_id = ?
+      ORDER BY mf.id ASC
+    ''',
+      [surveyId],
+    );
+    return rows.map(MediaFile.fromMap).toList();
   }
 }

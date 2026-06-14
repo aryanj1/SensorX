@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.blu"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     
 
     compileOptions {

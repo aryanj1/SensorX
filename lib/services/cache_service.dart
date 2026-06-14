@@ -91,10 +91,12 @@ class TTLFileCache {
             (jsonDecode(raw) as List).cast<Map>().cast<Map<String, dynamic>>();
         _index
           ..clear()
-          ..addEntries(list.map((m) {
-            final e = FileCacheEntry.fromJson(m);
-            return MapEntry(e.filename, e);
-          }));
+          ..addEntries(
+            list.map((m) {
+              final e = FileCacheEntry.fromJson(m);
+              return MapEntry(e.filename, e);
+            }),
+          );
       } catch (_) {
         await _rebuildIndexFromDisk();
       }

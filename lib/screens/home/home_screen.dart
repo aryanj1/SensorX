@@ -161,7 +161,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('blu'),
+        title: const Text('X-Survey'),
         actions: [
           IconButton(
             icon: Icon(
@@ -212,36 +212,51 @@ class _HomeScreenState extends State<HomeScreen> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_surveyors.isEmpty) {
-      return const Center(
-        child: Text('No surveyors yet. Tap + to add one.'),
-      );
+      return const Center(child: Text('No surveyors yet. Tap + to add one.'));
     }
-    return ListView.builder(
-      itemCount: _surveyors.length,
-      itemBuilder: (context, index) {
-        final s = _surveyors[index];
-        return Card(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: ListTile(
-            leading: const CircleAvatar(child: Icon(Icons.person)),
-            title: Text(s.name),
-            trailing: IconButton(
-              icon: const Icon(Icons.delete_outline),
-              tooltip: 'Delete surveyor',
-              onPressed: () => _confirmDeleteSurveyor(s),
-            ),
-            onTap: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SurveyorScreen(surveyor: s, cache: _cache),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Text(
+            'Surveyors',
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: _surveyors.length,
+            itemBuilder: (context, index) {
+              final s = _surveyors[index];
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: ListTile(
+                  leading: const CircleAvatar(child: Icon(Icons.person)),
+                  title: Text(s.name),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    tooltip: 'Delete surveyor',
+                    onPressed: () => _confirmDeleteSurveyor(s),
+                  ),
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            SurveyorScreen(surveyor: s, cache: _cache),
+                      ),
+                    );
+                    _loadData();
+                  },
                 ),
               );
-              _loadData();
             },
           ),
-        );
-      },
+        ),
+      ],
     );
   }
 }
@@ -311,9 +326,9 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> {
   }
 
   void _openPendingFiles() {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => PendingFilesScreen(cache: _cache),
-    ));
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => PendingFilesScreen(cache: _cache)),
+    );
   }
 
   @override
@@ -336,9 +351,11 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> {
               itemBuilder: (context, index) {
                 final device = foundDevices[index].device;
                 return ListTile(
-                  title: Text(device.platformName.isNotEmpty
-                      ? device.platformName
-                      : '(Unknown Device)'),
+                  title: Text(
+                    device.platformName.isNotEmpty
+                        ? device.platformName
+                        : '(Unknown Device)',
+                  ),
                   subtitle: Text(device.remoteId.str),
                   trailing: Text('${foundDevices[index].rssi} dBm'),
                   onTap: () => _connectAndShowData(device),

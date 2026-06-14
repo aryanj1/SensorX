@@ -5,15 +5,16 @@ import 'package:blu/screens/home/home_screen.dart';
 class App extends StatelessWidget {
   const App({super.key});
 
-  static final ValueNotifier<ThemeMode> themeModeNotifier =
-      ValueNotifier(ThemeMode.light);
+  static final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(
+    ThemeMode.light,
+  );
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: App.themeModeNotifier,
       builder: (_, mode, __) => MaterialApp(
-        title: 'blu',
+        title: 'X-Survey',
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
           useMaterial3: true,

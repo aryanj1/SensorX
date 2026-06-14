@@ -42,8 +42,9 @@ class _MeasurementReadingsScreenState extends State<MeasurementReadingsScreen> {
 
     try {
       final db = await DatabaseService.instance();
-      final results =
-          await db.getReadingsForMeasurement(widget.measurement.id!);
+      final results = await db.getReadingsForMeasurement(
+        widget.measurement.id!,
+      );
       if (!mounted) return;
       setState(() {
         _readings = results;

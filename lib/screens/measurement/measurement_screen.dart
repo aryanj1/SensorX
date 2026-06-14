@@ -1,14 +1,19 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:vibration/vibration.dart';
 
 import '../../models/measurement.dart';
+import '../../models/media_file.dart';
 import '../../models/reading.dart';
 import '../../services/cache_service.dart';
 import '../../services/database_service.dart';
@@ -136,22 +141,23 @@ class _MeasurementScreenState extends State<MeasurementScreen> {
       distanceFilter: 5,
     );
     _positionStream =
-        Geolocator.getPositionStream(locationSettings: locationSettings)
-            .listen((Position pos) {
-      setState(() {
-        phoneLatitude = pos.latitude.toString();
-        phoneLongitude = pos.longitude.toString();
-        gpsUtcIso = pos.timestamp.toUtc().toIso8601String();
-      });
-      _mapController.move(LatLng(pos.latitude, pos.longitude), 16);
-    });
+        Geolocator.getPositionStream(locationSettings: locationSettings).listen(
+      (Position pos) {
+        setState(() {
+          phoneLatitude = pos.latitude.toString();
+          phoneLongitude = pos.longitude.toString();
+          gpsUtcIso = pos.timestamp.toUtc().toIso8601String();
+        });
+        _mapController.move(LatLng(pos.latitude, pos.longitude), 16);
+      },
+    );
   }
 
   Future<void> _getPhoneLocation() async {
     await Geolocator.requestPermission();
     final pos = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high));
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    );
     setState(() {
       phoneLatitude = pos.latitude.toString();
       phoneLongitude = pos.longitude.toString();
@@ -201,22 +207,27 @@ class _MeasurementScreenState extends State<MeasurementScreen> {
                 if (_measurementStatus == 'active' &&
                     widget.measurement?.id != null) {
                   final db = await DatabaseService.instance();
-                  await db.insertReading(Reading(
-                    measurementId: widget.measurement!.id!,
-                    gpsUtc:
-                        gpsUtcIso ?? DateTime.now().toUtc().toIso8601String(),
-                    errorCode: int.tryParse(ordered['Error Code'] ?? '0') ?? 0,
-                    methanePpm:
-                        double.tryParse(ordered['Methane (ppm)'] ?? '0') ?? 0.0,
-                    ethanePpm:
-                        double.tryParse(ordered['Ethane (ppm)'] ?? '0') ?? 0.0,
-                    latitude: phoneLatitude != null
-                        ? double.tryParse(phoneLatitude!)
-                        : null,
-                    longitude: phoneLongitude != null
-                        ? double.tryParse(phoneLongitude!)
-                        : null,
-                  ));
+                  await db.insertReading(
+                    Reading(
+                      measurementId: widget.measurement!.id!,
+                      gpsUtc:
+                          gpsUtcIso ?? DateTime.now().toUtc().toIso8601String(),
+                      errorCode:
+                          int.tryParse(ordered['Error Code'] ?? '0') ?? 0,
+                      methanePpm:
+                          double.tryParse(ordered['Methane (ppm)'] ?? '0') ??
+                              0.0,
+                      ethanePpm:
+                          double.tryParse(ordered['Ethane (ppm)'] ?? '0') ??
+                              0.0,
+                      latitude: phoneLatitude != null
+                          ? double.tryParse(phoneLatitude!)
+                          : null,
+                      longitude: phoneLongitude != null
+                          ? double.tryParse(phoneLongitude!)
+                          : null,
+                    ),
+                  );
                 }
 
                 final methane =
@@ -299,6 +310,94 @@ class _MeasurementScreenState extends State<MeasurementScreen> {
     }
   }
 
+  Future<void> _capturePhoto() async {
+    if (_measurementStatus != 'active') {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Start measurement to capture GPS-tagged media.'),
+        ),
+      );
+      return;
+    }
+    if (widget.measurement?.id == null) return;
+    final picked = await ImagePicker().pickImage(source: ImageSource.camera);
+    if (picked == null) return;
+    final appDir = await getApplicationDocumentsDirectory();
+    final surveyId = widget.measurement!.surveyId;
+    final measurementId = widget.measurement!.id!;
+    final destDir = Directory(
+      p.join(appDir.path, 'survey_$surveyId', 'measurement_$measurementId'),
+    );
+    if (!await destDir.exists()) await destDir.create(recursive: true);
+    final now = DateTime.now().toUtc();
+    final stamp =
+        '${now.year.toString().padLeft(4, '0')}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+    final destPath = p.join(destDir.path, 'photo_$stamp.jpg');
+    await File(picked.path).copy(destPath);
+    final db = await DatabaseService.instance();
+    await db.insertMediaFile(
+      MediaFile(
+        measurementId: measurementId,
+        path: destPath,
+        type: 'photo',
+        timestamp: now.toIso8601String(),
+        latitude:
+            phoneLatitude != null ? double.tryParse(phoneLatitude!) : null,
+        longitude:
+            phoneLongitude != null ? double.tryParse(phoneLongitude!) : null,
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Photo saved.')));
+  }
+
+  Future<void> _captureVideo() async {
+    if (_measurementStatus != 'active') {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Start measurement to capture GPS-tagged media.'),
+        ),
+      );
+      return;
+    }
+    if (widget.measurement?.id == null) return;
+    final picked = await ImagePicker().pickVideo(source: ImageSource.camera);
+    if (picked == null) return;
+    final appDir = await getApplicationDocumentsDirectory();
+    final surveyId = widget.measurement!.surveyId;
+    final measurementId = widget.measurement!.id!;
+    final destDir = Directory(
+      p.join(appDir.path, 'survey_$surveyId', 'measurement_$measurementId'),
+    );
+    if (!await destDir.exists()) await destDir.create(recursive: true);
+    final now = DateTime.now().toUtc();
+    final stamp =
+        '${now.year.toString().padLeft(4, '0')}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+    final destPath = p.join(destDir.path, 'video_$stamp.mp4');
+    await File(picked.path).copy(destPath);
+    final db = await DatabaseService.instance();
+    await db.insertMediaFile(
+      MediaFile(
+        measurementId: measurementId,
+        path: destPath,
+        type: 'video',
+        timestamp: now.toIso8601String(),
+        latitude:
+            phoneLatitude != null ? double.tryParse(phoneLatitude!) : null,
+        longitude:
+            phoneLongitude != null ? double.tryParse(phoneLongitude!) : null,
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Video saved.')));
+  }
+
   Future<void> _startMeasurement() async {
     if (widget.measurement?.id == null) return;
     final db = await DatabaseService.instance();
@@ -344,9 +443,11 @@ class _MeasurementScreenState extends State<MeasurementScreen> {
 
   void _openPendingFiles() {
     if (widget.cache == null) return;
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => PendingFilesScreen(cache: widget.cache!),
-    ));
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PendingFilesScreen(cache: widget.cache!),
+      ),
+    );
   }
 
   @override
@@ -438,14 +539,36 @@ class _MeasurementScreenState extends State<MeasurementScreen> {
                 ],
               ),
             ),
+          if (widget.measurement != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.camera_alt),
+                    label: const Text('Photo'),
+                    onPressed: _capturePhoto,
+                  ),
+                  const SizedBox(width: 12),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.videocam),
+                    label: const Text('Video'),
+                    onPressed: _captureVideo,
+                  ),
+                ],
+              ),
+            ),
           if (phoneLatitude != null && phoneLongitude != null)
             SizedBox(
               height: 200,
               child: FlutterMap(
                 mapController: _mapController,
                 options: MapOptions(
-                  initialCenter: LatLng(double.parse(phoneLatitude!),
-                      double.parse(phoneLongitude!)),
+                  initialCenter: LatLng(
+                    double.parse(phoneLatitude!),
+                    double.parse(phoneLongitude!),
+                  ),
                   initialZoom: 16.0,
                   onTap: (tapPos, latlng) =>
                       setState(() => customMarkers.add(latlng)),
@@ -460,20 +583,29 @@ class _MeasurementScreenState extends State<MeasurementScreen> {
                   MarkerLayer(
                     markers: [
                       Marker(
-                        point: LatLng(double.parse(phoneLatitude!),
-                            double.parse(phoneLongitude!)),
+                        point: LatLng(
+                          double.parse(phoneLatitude!),
+                          double.parse(phoneLongitude!),
+                        ),
                         width: 40,
                         height: 40,
-                        child: const Icon(Icons.circle,
-                            color: Colors.blue, size: 18),
+                        child: const Icon(
+                          Icons.circle,
+                          color: Colors.blue,
+                          size: 18,
+                        ),
                       ),
-                      ...customMarkers.map((pos) => Marker(
-                            point: pos,
-                            width: 40,
-                            height: 40,
-                            child: const Icon(Icons.location_on,
-                                color: Colors.green),
-                          )),
+                      ...customMarkers.map(
+                        (pos) => Marker(
+                          point: pos,
+                          width: 40,
+                          height: 40,
+                          child: const Icon(
+                            Icons.location_on,
+                            color: Colors.green,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -488,8 +620,10 @@ class _MeasurementScreenState extends State<MeasurementScreen> {
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                    content: Text(
-                        'Current Coordinates: $phoneLatitude, $phoneLongitude')),
+                  content: Text(
+                    'Current Coordinates: $phoneLatitude, $phoneLongitude',
+                  ),
+                ),
               );
             },
             child: const Text('Get Coordinates'),
@@ -539,14 +673,20 @@ class _MeasurementScreenState extends State<MeasurementScreen> {
                             final entry = dataLog[index];
                             return Card(
                               margin: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 6),
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
                               child: Padding(
                                 padding: const EdgeInsets.all(12),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: entry.entries
-                                      .map((e) => Text('${e.key}: ${e.value}',
-                                          style: const TextStyle(fontSize: 14)))
+                                      .map(
+                                        (e) => Text(
+                                          '${e.key}: ${e.value}',
+                                          style: const TextStyle(fontSize: 14),
+                                        ),
+                                      )
                                       .toList(),
                                 ),
                               ),

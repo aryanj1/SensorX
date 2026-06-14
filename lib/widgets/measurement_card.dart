@@ -22,10 +22,7 @@ class MeasurementCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: ListTile(
-        title: Text(
-          measurement.name,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: Text(measurement.name, overflow: TextOverflow.ellipsis),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

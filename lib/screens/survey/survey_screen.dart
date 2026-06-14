@@ -32,15 +32,36 @@ class _SurveyScreenState extends State<SurveyScreen> {
     _loadMeasurements();
   }
 
+  Future<void> _exportZip() async {
+    if (widget.survey.id == null) return;
+    try {
+      final path = await ExportService.exportSurveyZip(widget.survey.id!);
+      if (!mounted) return;
+      final result = await Share.shareXFiles([
+        XFile(path),
+      ], subject: 'Survey ZIP Export');
+      if (!mounted) return;
+      if (result.status == ShareResultStatus.dismissed) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Share dismissed — ZIP was ready.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('ZIP export error: $e')));
+    }
+  }
+
   Future<void> _exportCsv() async {
     if (widget.survey.id == null) return;
     try {
       final path = await ExportService.buildCsv(widget.survey.id!);
       if (!mounted) return;
-      final result = await Share.shareXFiles(
-        [XFile(path)],
-        subject: 'Survey CSV Export',
-      );
+      final result = await Share.shareXFiles([
+        XFile(path),
+      ], subject: 'Survey CSV Export');
       if (!mounted) return;
       if (result.status == ShareResultStatus.dismissed) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -49,9 +70,9 @@ class _SurveyScreenState extends State<SurveyScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Export error [v2]: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Export error [v2]: $e')));
     }
   }
 
@@ -140,11 +161,13 @@ class _SurveyScreenState extends State<SurveyScreen> {
                       return;
                     }
                     final db = await DatabaseService.instance();
-                    await db.insertMeasurement(Measurement(
-                      surveyId: widget.survey.id!,
-                      name: name,
-                      status: 'idle',
-                    ));
+                    await db.insertMeasurement(
+                      Measurement(
+                        surveyId: widget.survey.id!,
+                        name: name,
+                        status: 'idle',
+                      ),
+                    );
                     if (!ctx.mounted) return;
                     Navigator.pop(ctx);
                     await _loadMeasurements();
@@ -175,10 +198,9 @@ class _SurveyScreenState extends State<SurveyScreen> {
             Text(
               'Surveyor: ${widget.survey.surveyorName}',
               style: textTheme.bodySmall?.copyWith(
-                color: Theme.of(context)
-                    .colorScheme
-                    .onPrimary
-                    .withValues(alpha: 0.8),
+                color: Theme.of(
+                  context,
+                ).colorScheme.onPrimary.withValues(alpha: 0.8),
               ),
             ),
           ],
@@ -188,6 +210,11 @@ class _SurveyScreenState extends State<SurveyScreen> {
             icon: const Icon(Icons.share),
             tooltip: 'Share CSV',
             onPressed: _exportCsv,
+          ),
+          IconButton(
+            icon: const Icon(Icons.archive_outlined),
+            tooltip: 'Share ZIP',
+            onPressed: _exportZip,
           ),
         ],
       ),
@@ -209,37 +236,53 @@ class _SurveyScreenState extends State<SurveyScreen> {
         child: Text('No measurements yet. Tap + to add one.'),
       );
     }
-    return ListView.builder(
-      itemCount: _measurements.length,
-      itemBuilder: (context, index) {
-        return MeasurementCard(
-          measurement: _measurements[index],
-          onTap: () async {
-            await Navigator.push(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Text(
+            'Measurements',
+            style: Theme.of(
               context,
-              MaterialPageRoute(
-                builder: (_) => MeasurementScreen(
-                  device: BleState.currentDevice,
-                  cache: widget.cache ?? BleState.currentCache,
-                  measurement: _measurements[index],
-                ),
-              ),
-            );
-            await _loadMeasurements();
-          },
-          onViewReadings: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => MeasurementReadingsScreen(
-                  measurement: _measurements[index],
-                ),
-              ),
-            );
-          },
-          onDelete: () => _confirmDeleteMeasurement(_measurements[index]),
-        );
-      },
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: _measurements.length,
+            itemBuilder: (context, index) {
+              return MeasurementCard(
+                measurement: _measurements[index],
+                onTap: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MeasurementScreen(
+                        device: BleState.currentDevice,
+                        cache: widget.cache ?? BleState.currentCache,
+                        measurement: _measurements[index],
+                      ),
+                    ),
+                  );
+                  await _loadMeasurements();
+                },
+                onViewReadings: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MeasurementReadingsScreen(
+                        measurement: _measurements[index],
+                      ),
+                    ),
+                  );
+                },
+                onDelete: () => _confirmDeleteMeasurement(_measurements[index]),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }

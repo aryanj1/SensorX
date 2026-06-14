@@ -40,22 +40,26 @@ class _PendingFilesScreenState extends State<PendingFilesScreen> {
       try {
         final stat = await f.stat();
         final lines = await _countLinesQuick(f, maxToRead: 1000000);
-        metas.add(_FileMeta(
-          name: f.uri.pathSegments.last,
-          file: f,
-          sizeBytes: stat.size,
-          modified: stat.modified,
-          recordCount: lines > 0 ? lines - 1 : 0, // minus header
-        ));
+        metas.add(
+          _FileMeta(
+            name: f.uri.pathSegments.last,
+            file: f,
+            sizeBytes: stat.size,
+            modified: stat.modified,
+            recordCount: lines > 0 ? lines - 1 : 0, // minus header
+          ),
+        );
       } catch (e) {
-        metas.add(_FileMeta(
-          name: f.uri.pathSegments.last,
-          file: f,
-          sizeBytes: 0,
-          modified: DateTime.fromMillisecondsSinceEpoch(0),
-          recordCount: 0,
-          error: e.toString(),
-        ));
+        metas.add(
+          _FileMeta(
+            name: f.uri.pathSegments.last,
+            file: f,
+            sizeBytes: 0,
+            modified: DateTime.fromMillisecondsSinceEpoch(0),
+            recordCount: 0,
+            error: e.toString(),
+          ),
+        );
       }
     }
     return metas;
@@ -74,8 +78,10 @@ class _PendingFilesScreenState extends State<PendingFilesScreen> {
     return count;
   }
 
-  static Future<List<List<String>>> _readCsvPreview(String path,
-      {int maxLines = 300}) async {
+  static Future<List<List<String>>> _readCsvPreview(
+    String path, {
+    int maxLines = 300,
+  }) async {
     final lines = await File(path).readAsLines();
     final take = lines.take(maxLines).toList();
     return take.map((l) => l.split(',')).toList();
@@ -156,11 +162,15 @@ class _PendingFilesScreenState extends State<PendingFilesScreen> {
                           final m = items[i];
                           return ListTile(
                             leading: const CircleAvatar(
-                                radius: 10,
-                                child: Icon(Icons.insert_drive_file, size: 14)),
-                            title: Text(m.name,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w600)),
+                              radius: 10,
+                              child: Icon(Icons.insert_drive_file, size: 14),
+                            ),
+                            title: Text(
+                              m.name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                             subtitle: Text(
                               'Records: ${m.recordCount} • ${_fmtBytes(m.sizeBytes)} • Modified: ${m.modified.toLocal()}',
                             ),
@@ -174,14 +184,18 @@ class _PendingFilesScreenState extends State<PendingFilesScreen> {
                                       ? null
                                       : () async {
                                           final rows = await _readCsvPreview(
-                                              m.file.path,
-                                              maxLines: 500);
+                                            m.file.path,
+                                            maxLines: 500,
+                                          );
                                           if (!context.mounted) return;
-                                          Navigator.of(context)
-                                              .push(MaterialPageRoute(
-                                            builder: (_) => CsvPreviewScreen(
-                                                filename: m.name, rows: rows),
-                                          ));
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) => CsvPreviewScreen(
+                                                filename: m.name,
+                                                rows: rows,
+                                              ),
+                                            ),
+                                          );
                                         },
                                 ),
                                 IconButton(
@@ -244,8 +258,11 @@ class _SummaryBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
-          Icon(Icons.folder,
-              size: 20, color: Theme.of(context).colorScheme.primary),
+          Icon(
+            Icons.folder,
+            size: 20,
+            color: Theme.of(context).colorScheme.primary,
+          ),
           const SizedBox(width: 8),
           Text('Pending: $count • ${_fmtBytes(bytes)}'),
         ],
