@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'package:blu/app.dart';
 import '../files/csv_preview_screen.dart';
 import '../../services/cache_service.dart';
 
@@ -111,6 +112,10 @@ class _PendingFilesScreenState extends State<PendingFilesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: sensorXRed,
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
         title: const Text('Pending Files'),
         actions: [
           IconButton(

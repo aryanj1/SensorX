@@ -12,6 +12,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:vibration/vibration.dart';
 
+import 'package:blu/app.dart';
+
 import '../../models/measurement.dart';
 import '../../models/media_file.dart';
 import '../../models/reading.dart';
@@ -454,6 +456,10 @@ class _MeasurementScreenState extends State<MeasurementScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: sensorXRed,
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
         title: Text(
           widget.device != null && widget.device!.platformName.isNotEmpty
               ? 'Connected: ${widget.device!.platformName}'

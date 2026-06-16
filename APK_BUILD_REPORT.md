@@ -12,22 +12,21 @@ flutter build apk --release
 build/app/outputs/flutter-apk/app-release.apk
 
 ## Dist Path
-dist/xsurvey-release-20260615-164153/app-release.apk
+dist/xsurvey-release-20260616-115435/app-release.apk
 
 ## App Version
 1.0.0+1
 
-## APK Size
+## File Size
 25 MB
 
 ## Timestamp
-2026-06-15 16:41:53 local
+2026-06-16 11:54:35 local
 
 ## Notes
-- flutter clean run before build to clear stale artifacts (per standing rule).
-- Build completed in ~41 seconds. Flutter 3.32.8, Dart 3.8.1.
-- Font tree-shaking applied: MaterialIcons-Regular.otf reduced 99.6% (1.6 MB to 5.9 KB).
-- 3 Java compiler warnings: source/target value 8 obsolete — Gradle/AGP toolchain warnings, not project code issues; safe to ignore until AGP is updated.
-- 85 packages have newer versions incompatible with current dependency constraints; no action required for this build.
-- APK is debug-signed (no production keystore configured). For Play Store or enterprise distribution, configure a release keystore per docs/apk_delivery.md.
-- Bugs addressed in this build: BLE connected-state persistence on back-navigation; back-navigation after BLE connect lands on HomeScreen not Record/Map; live panel shows only CH4/C2H6 values with no time/elapsed display.
+- Release build; quality pre-confirmed by orchestrator (QUALITY_PASS).
+- flutter clean + flutter pub get run by orchestrator before handoff; skipped pre-build re-run per handoff instructions.
+- Build completed in ~50 s via Gradle assembleRelease.
+- MaterialIcons font tree-shaken: 1,645,184 -> 5,940 bytes (99.6% reduction).
+- 3 Java compiler warnings: source/target value 8 obsolete options (Xlint); Gradle/AGP toolchain warnings, not project code issues; safe to ignore.
+- Signed with debug keystore (no production signing configured — see project signing status memory).

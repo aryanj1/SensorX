@@ -7,6 +7,41 @@ Format follows: Added, Changed, Fixed, Known Issues.
 ## Unreleased
 
 ### Added
+- Pre-measurement workload modal: after survey selection, a required bottom sheet collects **Expected joints to survey**, **Expected photos**, and **Expected videos** before any measurement is created. All three fields accept only positive integers (≥ 1); empty, zero, negative, decimal, and non-numeric inputs are rejected with an inline error. Values are saved with the measurement as `expected_joints`, `expected_photos`, `expected_videos`.
+- Phone-storage safety check: immediately after the workload sheet is submitted, available device storage is queried via a native `MethodChannel` (`com.blu.storage/free_space` → `StatFs` on Android). Estimated usage is `(photos × 10 MB + videos × 150 MB) × 1.2` buffer. If estimated usage exceeds free space or headroom after use falls below 500 MB, an alert — *"Storage is almost finished. Photos and videos may be lost if you continue."* — is shown with a red **Continue anyway** button (proceeds) and a **Leave** button (cancels flow without creating the measurement). If the storage API is unavailable, the flow proceeds safely without blocking.
+- `DatabaseService` v6 migration: `ALTER TABLE measurements ADD COLUMN expected_joints/expected_photos/expected_videos INTEGER NOT NULL DEFAULT 0`. Existing installations upgrade without data loss; old measurement rows default to 0 for the new columns.
+- `lib/widgets/workload_sheet.dart` — `WorkloadResult` data class + `WorkloadSheet` stateful widget.
+- `lib/services/storage_check_service.dart` — `StorageCheckResult` + `StorageCheckService.check()` (formula, 500 MB headroom threshold, graceful degradation on catch).
+- `android/app/src/main/kotlin/com/example/blu/MainActivity.kt` — `configureFlutterEngine` override registering the `com.blu.storage/free_space` MethodChannel; queries `StatFs(Environment.getDataDirectory())` and returns free MB as a `Double`.
+
+- App-wide SensorX brand red `#7D0D0D` (`sensorXRed` const in `lib/app.dart`). All major AppBars now use this color with white title, back-button, and action icons across: HomeScreen, BLE scanner, Surveyor page, Surveyor Workspace, Surveys, Measurement, Measurement Readings, Pending Files, CSV Preview.
+- HomeScreen AppBar title replaced with `assets/icons/logo21.png` logo (height 32, `BoxFit.contain`). Hero logo (height 80) centered above the surveyor list on the HomeScreen landing, shown in both populated and empty states.
+- Red sphere-on-pole `_LeakPinMarker` widget for map leak marks — replaces the orange warning icon. Marker anchored bottom-center to GPS coordinate. **NOTE: reverted — see Changed below.**
+
+### Changed
+- App forced to dark mode permanently (`ThemeMode.dark` hardcoded in `app.dart`). Dark/light theme toggle removed from HomeScreen AppBar.
+- Legacy Pending Files `folder_open` icon button removed from HomeScreen AppBar. Underlying pending-file logic and BLE-page folder button are unchanged.
+- Map path/polyline color changed from `Color(0xFF8B0000)` to `sensorXRed` (`0xFF7D0D0D`).
+- Current-location blue dot marker reduced from 28 dp to 17 dp diameter (≈40% smaller); border width reduced from 2.5 to 1.5 dp.
+- Current-location blue dot marker reverted to stable 28 dp diameter / 2.5 dp border after 17 dp caused glitchy anchor behaviour.
+- Current-location blue dot reduced to 17 dp / 1.5 dp border (≈40% reduction from 28 dp) — stable, no anchor change.
+- Leak map marker reverted from custom `_LeakPinMarker` (red sphere-on-pole widget) back to `Icons.warning_amber_rounded` orange icon (36×36 Marker, size 28) — stable and correctly anchored at saved leak GPS coordinates.
+- Legacy `folder_open` icon button removed from `BLEScannerScreen` AppBar. `PendingFilesScreen` source file unchanged; the entry point is simply no longer exposed in the BLE scanner top bar.
+- HomeScreen AppBar logo changed from `logo21.png` to `logo2.png` (height 32). Hero 80 dp logo below the AppBar removed from both empty and populated surveyor list states.
+- BLE scan intro wait reduced from 4 seconds to 2 seconds (`ble_scan_wait_screen.dart`).
+
+### Added
+- Android foreground service for background BLE logging (`lib/services/background_service.dart`). When a measurement is Active and the app is backgrounded, BLE readings continue to be logged to SQLite via a persistent foreground notification. Logging pauses when measurement is Paused; service stops when measurement is Stopped/Finished. No duplicate rows on foreground return. Requires `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_CONNECTED_DEVICE` Android permissions (added to `AndroidManifest.xml`). **NOTE: reverted — see Fixed below.**
+- Active-measurement navigation lock: while a measurement is Active, switching tabs or pressing Back in `SurveyorWorkspaceScreen` shows an alert dialog ("Pause or finish the active measurement before leaving.") and blocks navigation. Paused or stopped measurements allow free navigation.
+- Surveyor active indicator: HomeScreen surveyor cards now show a small green "Active" subtitle when that surveyor has a currently active measurement. Label absent for idle, paused, or stopped states.
+
+### Changed
+- BLE connection flow no longer navigates to the legacy reading screen. After a sensor connects, the app stays on the BLE page and shows the connected-device box immediately. `MeasurementScreen` import removed from `home_screen.dart`.
+- Map auto-follow no longer overrides manual user zoom. After the user drags/pinches the map, GPS location updates move the camera center only (preserving the user's zoom level via `_mapController.camera.zoom`). First-time startup zoom of 16 is preserved. Manual-interaction flag resets when a new recording starts.
+- Current-location marker upgraded to a solid blue filled circle (28 dp) with a 2.5 dp white border and drop shadow — Strava-style indicator replacing the flat icon.
+- Map floating action buttons (`_MapFab`) upgraded to solid black (`0xFF000000`), 52 dp diameter, with drop shadow — more premium and consistent with reference design.
+
+### Added
 - `LeakMark` model (`lib/models/leak_mark.dart`): `id`, `measurement_id`, `timestamp`, `latitude?`, `longitude?`, `note?`, `media_path?` — with `fromMap`/`toMap`.
 - `DatabaseService` v5: new `leak_marks` table with `ON DELETE CASCADE` on `measurement_id`. DB v4→v5 migration adds the table without touching existing data. New methods: `insertLeakMark`, `getLeakMarksForMeasurement`, `getLeakMarksForSurvey`, `deleteLeakMark`.
 - Mark Leak FAB (warning icon) on Record/Map screen: fifth circular button in the right-edge FAB stack. Active only when measurement status is `active`; shows SnackBar "Start a measurement to mark a leak." otherwise. Bottom sheet accepts an optional note and optional photo attachment. Saves `LeakMark` to SQLite with current GPS (null-safe if GPS unavailable). Shows SnackBar "Leak marked" on success.
@@ -14,6 +49,7 @@ Format follows: Added, Changed, Fixed, Known Issues.
 - Updated `ExportService.exportSurveyZip`: main survey CSV now has 10 columns (`GPS UTC, Measurement Name, Error Code, Methane (ppm), Ethane (ppm), Latitude, Longitude, notes, media_exists, leak_marked`). ZIP additionally includes `notes.csv` (if notes exist), `media.csv` (if media exists), and `leak_marked.csv` (if leak marks exist). Media files inside the ZIP are copied with safe export names (`{survey}_{measurement}_{timestamp}_{type}_{index}.{ext}`) — original on-disk files are not renamed. `buildCsv` (legacy 7-column CSV share) is unchanged.
 
 ### Fixed
+- **App crash at splash screen on reopen after backgrounding** — reverted the entire `flutter_background_service` background logging implementation. Root cause: `main()` called `initBackgroundService()` unconditionally on every app open/resume; when the background service isolate was already running (started when the measurement was backgrounded), calling `configure()` a second time deadlocked the platform-channel binding, crashing the process at splash. Additionally, the background isolate called `FlutterBluePlus.connectedDevices` and `discoverServices()` inside a secondary Flutter engine where BLE plugin handles are invalid, leaving a zombie foreground service. Fix: removed `lib/services/background_service.dart`, reverted `lib/main.dart` to minimal form, removed `WidgetsBindingObserver` mixin and all `BackgroundService.*` calls from `record_map_tab.dart`, and removed the `<service>` element from `AndroidManifest.xml`. `flutter_background_service: ^5.1.0` removed from `pubspec.yaml`. Foreground logging, navigation lock, and surveyor active indicator are all unaffected.
 - BLE connected-device row in `BLEScannerScreen` (`_buildConnectedDeviceSection`) no longer blinks and disappears due to transient BLE stream events during scan start/stop. Guard changed from `!isConnected` to `!isConnected && !device.isConnected` so a spurious `disconnected` stream event does not hide the row while the device remains physically connected.
 - "Go to BLE" navigation from the no-device measurement alert now uses `Navigator.popUntil(isFirst)` before pushing `BleScanWaitScreen`, so pressing Back from the BLE page after connecting returns to `HomeScreen` (surveyor list) instead of the Record/Map screen.
 - Record/Map live record panel no longer displays elapsed time. Only Methane (CH₄) and Ethane (C₂H₆) values are shown. Timestamp logging to SQLite and CSV export are unaffected.

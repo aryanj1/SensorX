@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:blu/app.dart';
+
 class CsvPreviewScreen extends StatelessWidget {
   final String filename;
   final List<List<String>> rows;
@@ -15,7 +17,13 @@ class CsvPreviewScreen extends StatelessWidget {
     final headers = rows.isNotEmpty ? rows.first : <String>[];
     final dataRows = rows.length > 1 ? rows.sublist(1) : const <List<String>>[];
     return Scaffold(
-      appBar: AppBar(title: Text('Preview: $filename')),
+      appBar: AppBar(
+        backgroundColor: sensorXRed,
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
+        title: Text('Preview: $filename'),
+      ),
       body: rows.isEmpty
           ? const Center(child: Text('No data'))
           : SingleChildScrollView(

@@ -27,7 +27,7 @@ class DatabaseService {
     final path = p.join(dbPath, 'blu_surveys.db');
     return openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
@@ -60,12 +60,15 @@ class DatabaseService {
 
     await db.execute('''
       CREATE TABLE measurements (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        survey_id  INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
-        name       TEXT NOT NULL,
-        status     TEXT NOT NULL DEFAULT 'idle',
-        started_at TEXT,
-        stopped_at TEXT
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        survey_id        INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+        name             TEXT NOT NULL,
+        status           TEXT NOT NULL DEFAULT 'idle',
+        started_at       TEXT,
+        stopped_at       TEXT,
+        expected_joints  INTEGER NOT NULL DEFAULT 0,
+        expected_photos  INTEGER NOT NULL DEFAULT 0,
+        expected_videos  INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
@@ -184,6 +187,18 @@ class DatabaseService {
         note           TEXT,
         media_path     TEXT
       )''');
+    }
+
+    if (oldVersion < 6) {
+      await db.execute(
+        'ALTER TABLE measurements ADD COLUMN expected_joints INTEGER NOT NULL DEFAULT 0',
+      );
+      await db.execute(
+        'ALTER TABLE measurements ADD COLUMN expected_photos INTEGER NOT NULL DEFAULT 0',
+      );
+      await db.execute(
+        'ALTER TABLE measurements ADD COLUMN expected_videos INTEGER NOT NULL DEFAULT 0',
+      );
     }
   }
 
@@ -471,5 +486,16 @@ class DatabaseService {
   Future<int> deleteLeakMark(int id) async {
     final db = _database;
     return db.delete('leak_marks', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Returns true if any measurement for the given surveyor is currently active.
+  Future<bool> hasActiveMeasurementForSurveyor(int surveyorId) async {
+    final result = await _database.rawQuery(
+      'SELECT COUNT(*) AS cnt FROM measurements '
+      'INNER JOIN surveys ON surveys.id = measurements.survey_id '
+      'WHERE surveys.surveyor_id = ? AND measurements.status = ?',
+      [surveyorId, 'active'],
+    );
+    return Sqflite.firstIntValue(result)! > 0;
   }
 }

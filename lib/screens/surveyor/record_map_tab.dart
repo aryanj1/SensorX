@@ -11,6 +11,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'package:blu/app.dart';
 import 'package:blu/models/leak_mark.dart';
 import 'package:blu/models/measurement.dart';
 import 'package:blu/models/media_file.dart';
@@ -22,6 +23,8 @@ import 'package:blu/screens/ble/ble_scan_wait_screen.dart';
 import 'package:blu/services/ble_state.dart';
 import 'package:blu/services/cache_service.dart';
 import 'package:blu/services/database_service.dart';
+import 'package:blu/services/storage_check_service.dart';
+import 'package:blu/widgets/workload_sheet.dart';
 
 class RecordMapTab extends StatefulWidget {
   final Surveyor surveyor;
@@ -71,6 +74,9 @@ class RecordMapTabState extends State<RecordMapTab> {
   String? _sessionFile;
   static const _ttl = Duration(days: 14);
   static const _maxCacheBytes = 200 * 1024 * 1024;
+
+  // Map interaction
+  bool _userHasMovedMap = false;
 
   // Overlays
   bool _showAlarmOverlay = false;
@@ -122,9 +128,14 @@ class RecordMapTabState extends State<RecordMapTab> {
         _lng = pos.longitude;
         _gpsUtcIso = pos.timestamp.toUtc().toIso8601String();
       });
-      try {
-        _mapController.move(LatLng(pos.latitude, pos.longitude), 16);
-      } catch (_) {}
+      if (!_userHasMovedMap) {
+        try {
+          _mapController.move(
+            LatLng(pos.latitude, pos.longitude),
+            _mapController.camera.zoom,
+          );
+        } catch (_) {}
+      }
       if (_recordStatus == 'active') {
         setState(() {
           _routePoints.add(LatLng(pos.latitude, pos.longitude));
@@ -494,6 +505,61 @@ class RecordMapTabState extends State<RecordMapTab> {
                       return;
                     }
 
+                    // Pop the start dialog before showing the workload sheet.
+                    if (!ctx.mounted) return;
+                    Navigator.pop(ctx);
+                    if (!mounted) return;
+
+                    // Step 1: collect workload expectations.
+                    final workload = await showModalBottomSheet<WorkloadResult>(
+                      context: context,
+                      isScrollControlled: true,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.vertical(top: Radius.circular(20)),
+                      ),
+                      builder: (_) => const WorkloadSheet(),
+                    );
+                    if (workload == null) return;
+                    if (!mounted) return;
+
+                    // Step 2: check available storage.
+                    final checkResult = await StorageCheckService.check(
+                      photos: workload.photos,
+                      videos: workload.videos,
+                    );
+                    if (!mounted) return;
+
+                    // Step 3: warn user if storage may be insufficient.
+                    if (checkResult.needsWarning) {
+                      final proceed = await showDialog<bool>(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (dCtx) => AlertDialog(
+                          title: const Text('Storage almost full'),
+                          content: const Text(
+                            'Storage is almost finished. Photos and videos may be lost if you continue.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dCtx, false),
+                              child: const Text('Leave'),
+                            ),
+                            TextButton(
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.red,
+                              ),
+                              onPressed: () => Navigator.pop(dCtx, true),
+                              child: const Text('Continue anyway'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (proceed != true) return;
+                    }
+                    if (!mounted) return;
+
+                    // Step 4: create the measurement now that all checks pass.
                     final startedAt = DateTime.now().toUtc().toIso8601String();
                     final mId = await db.insertMeasurement(
                       Measurement(
@@ -501,11 +567,12 @@ class RecordMapTabState extends State<RecordMapTab> {
                         name: name,
                         status: 'active',
                         startedAt: startedAt,
+                        expectedJoints: workload.joints,
+                        expectedPhotos: workload.photos,
+                        expectedVideos: workload.videos,
                       ),
                     );
 
-                    if (!ctx.mounted) return;
-                    Navigator.pop(ctx);
                     if (!mounted) return;
 
                     setState(() {
@@ -517,6 +584,9 @@ class RecordMapTabState extends State<RecordMapTab> {
                         name: name,
                         status: 'active',
                         startedAt: startedAt,
+                        expectedJoints: workload.joints,
+                        expectedPhotos: workload.photos,
+                        expectedVideos: workload.videos,
                       );
                     });
                     _stopwatch
@@ -596,6 +666,7 @@ class RecordMapTabState extends State<RecordMapTab> {
       _leakMarkerPoints = [];
       _showLeakOverlay = false;
       _leakPickedMediaPath = null;
+      _userHasMovedMap = false;
     });
   }
 
@@ -625,10 +696,14 @@ class RecordMapTabState extends State<RecordMapTab> {
     } catch (_) {}
   }
 
+  /// Public getter so parent screens can check recording state.
+  String get recordStatus => _recordStatus;
+
   void activateMeasurement(Measurement m) {
     _stopwatch.stop();
     _stopwatch.reset();
     _ticker?.cancel();
+    _userHasMovedMap = false;
     setState(() {
       _activeMeasurement = m;
       _recordStatus = m.status == 'active'
@@ -980,6 +1055,15 @@ class RecordMapTabState extends State<RecordMapTab> {
         options: MapOptions(
           initialCenter: LatLng(_lat!, _lng!),
           initialZoom: 16.0,
+          onMapEvent: (MapEvent e) {
+            if (e is MapEventMoveStart &&
+                (e.source == MapEventSource.dragStart ||
+                    e.source == MapEventSource.onDrag)) {
+              if (!_userHasMovedMap && mounted) {
+                setState(() => _userHasMovedMap = true);
+              }
+            }
+          },
         ),
         children: [
           TileLayer(
@@ -992,7 +1076,7 @@ class RecordMapTabState extends State<RecordMapTab> {
               polylines: [
                 Polyline(
                   points: _routePoints,
-                  color: const Color(0xFF8B0000),
+                  color: sensorXRed,
                   strokeWidth: 4.0,
                 ),
               ],
@@ -1001,9 +1085,26 @@ class RecordMapTabState extends State<RecordMapTab> {
             markers: [
               Marker(
                 point: LatLng(_lat!, _lng!),
-                width: 40,
-                height: 40,
-                child: const Icon(Icons.circle, color: Colors.blue, size: 18),
+                width: 17,
+                height: 17,
+                child: Container(
+                  width: 17,
+                  height: 17,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.blue,
+                    border: Border.fromBorderSide(
+                      BorderSide(color: Colors.white, width: 1.5),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black38,
+                        blurRadius: 8,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -1595,13 +1696,20 @@ class _MapFab extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 44,
-        height: 44,
+        width: 52,
+        height: 52,
         decoration: BoxDecoration(
           color: active
               ? Colors.red.shade700.withValues(alpha: 0.9)
-              : const Color(0xCC1a1a1a),
+              : const Color(0xFF000000),
           shape: BoxShape.circle,
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black45,
+              blurRadius: 6,
+              offset: Offset(0, 3),
+            ),
+          ],
         ),
         child: Icon(icon, color: Colors.white, size: 22),
       ),

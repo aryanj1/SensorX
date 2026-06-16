@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'package:blu/app.dart';
+
 import 'package:blu/models/measurement.dart';
 import 'package:blu/models/survey.dart';
 import 'package:blu/services/cache_service.dart';
@@ -197,6 +199,10 @@ class _SurveyScreenState extends State<SurveyScreen> {
     final textTheme = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: sensorXRed,
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -204,9 +210,7 @@ class _SurveyScreenState extends State<SurveyScreen> {
             Text(
               'Surveyor: ${widget.survey.surveyorName}',
               style: textTheme.bodySmall?.copyWith(
-                color: Theme.of(
-                  context,
-                ).colorScheme.onPrimary.withValues(alpha: 0.8),
+                color: Colors.white.withValues(alpha: 0.8),
               ),
             ),
           ],

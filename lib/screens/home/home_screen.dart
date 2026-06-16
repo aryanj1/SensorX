@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:blu/app.dart';
 import 'package:blu/models/surveyor.dart';
@@ -11,8 +10,6 @@ import 'package:blu/services/ble_state.dart';
 import 'package:blu/services/cache_service.dart';
 import 'package:blu/services/database_service.dart';
 import 'package:blu/screens/ble/ble_scan_wait_screen.dart';
-import 'package:blu/screens/files/pending_files_screen.dart';
-import 'package:blu/screens/measurement/measurement_screen.dart';
 import 'package:blu/screens/surveyor/surveyor_workspace_screen.dart';
 
 // routeObserver is declared in app.dart and imported via package:blu/app.dart.
@@ -33,13 +30,13 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _loading = true;
   bool _cacheReady = false;
   TTLFileCache? _cache;
+  final Map<int, bool> _surveyorHasActive = {};
 
   @override
   void initState() {
     super.initState();
     _initCache();
     _loadData();
-    _loadTheme();
   }
 
   Future<void> _initCache() async {
@@ -51,26 +48,17 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Future<void> _loadTheme() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('theme_mode');
-    App.themeModeNotifier.value =
-        saved == 'dark' ? ThemeMode.dark : ThemeMode.light;
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _toggleTheme() async {
-    final isDark = App.themeModeNotifier.value == ThemeMode.dark;
-    App.themeModeNotifier.value = isDark ? ThemeMode.light : ThemeMode.dark;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('theme_mode', isDark ? 'light' : 'dark');
-    if (mounted) setState(() {});
-  }
-
   Future<void> _loadData() async {
     final db = await DatabaseService.instance();
     final results = await db.getAllSurveyors();
+    final activeResults = await Future.wait(
+      results.map((s) => db.hasActiveMeasurementForSurveyor(s.id!)),
+    );
     if (!mounted) return;
+    _surveyorHasActive.clear();
+    for (var i = 0; i < results.length; i++) {
+      _surveyorHasActive[results[i].id!] = activeResults[i];
+    }
     setState(() {
       _surveyors = results;
       _loading = false;
@@ -174,17 +162,18 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('X-Survey'),
+        toolbarHeight: 72,
+        centerTitle: true,
+        backgroundColor: sensorXRed,
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
+        title: Image.asset(
+          'assets/icons/home_logo.png',
+          width: MediaQuery.of(context).size.width * 0.62,
+          fit: BoxFit.contain,
+        ),
         actions: [
-          IconButton(
-            icon: Icon(
-              App.themeModeNotifier.value == ThemeMode.dark
-                  ? Icons.light_mode
-                  : Icons.dark_mode,
-            ),
-            tooltip: 'Toggle theme',
-            onPressed: _toggleTheme,
-          ),
           IconButton(
             icon: const Icon(Icons.bluetooth),
             tooltip: 'BLE Scanner',
@@ -202,18 +191,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     );
                   }
-                : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.folder_open),
-            tooltip: 'Pending files',
-            onPressed: _cacheReady
-                ? () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => PendingFilesScreen(cache: _cache!),
-                      ),
-                    )
                 : null,
           ),
         ],
@@ -260,10 +237,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 child: ListTile(
                   leading: CircleAvatar(
-                    backgroundColor: Colors.red.shade600,
+                    backgroundColor: sensorXRed,
                     child: const Icon(Icons.person, color: Colors.white),
                   ),
                   title: Text(s.name),
+                  subtitle: _surveyorHasActive[s.id] == true
+                      ? const Text(
+                          'Active',
+                          style: TextStyle(
+                            color: Colors.green,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        )
+                      : null,
                   trailing: IconButton(
                     icon: const Icon(Icons.delete_outline),
                     tooltip: 'Delete surveyor',
@@ -475,12 +462,6 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> with RouteAware {
     BleState.currentDevice = device;
     BleState.currentCache = _cache;
     if (mounted) setState(() => _connectedDevice = device);
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MeasurementScreen(device: device, cache: _cache),
-      ),
-    );
   }
 
   Widget _buildConnectedDeviceSection() {
@@ -553,30 +534,16 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> with RouteAware {
     );
   }
 
-  void _openPendingFiles() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => PendingFilesScreen(cache: _cache)),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF1C1C1E),
       appBar: AppBar(
-        title: const Text(
-          'Bluetooth',
-          style: TextStyle(color: Colors.white),
-        ),
-        backgroundColor: const Color(0xFF1C1C1E),
+        title: const Text('Bluetooth'),
+        backgroundColor: sensorXRed,
+        foregroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.folder),
-            tooltip: 'Pending files',
-            onPressed: _openPendingFiles,
-          ),
-        ],
+        actionsIconTheme: const IconThemeData(color: Colors.white),
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -598,7 +565,7 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> with RouteAware {
                     style: TextStyle(color: Colors.white),
                   ),
                   value: scanning,
-                  activeColor: Colors.red,
+                  activeColor: sensorXRed,
                   onChanged: (v) async {
                     if (v) {
                       _startBLEScan();

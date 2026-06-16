@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:blu/app.dart';
 import 'package:blu/models/survey.dart';
 import 'package:blu/models/surveyor.dart';
 import 'package:blu/services/cache_service.dart';
@@ -132,7 +133,13 @@ class _SurveyorScreenState extends State<SurveyorScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.surveyor.name)),
+      appBar: AppBar(
+        backgroundColor: sensorXRed,
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
+        title: Text(widget.surveyor.name),
+      ),
       body: _buildBody(),
       floatingActionButton: FloatingActionButton(
         onPressed: _showNewSurveyDialog,

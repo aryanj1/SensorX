@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+import 'package:blu/app.dart';
+
 import 'package:blu/models/measurement.dart';
 import 'package:blu/models/survey.dart';
 import 'package:blu/models/surveyor.dart';
@@ -32,7 +34,34 @@ class _SurveyorWorkspaceScreenState extends State<SurveyorWorkspaceScreen> {
   final _surveysKey = GlobalKey<_SurveysTabState>();
   final _recordMapKey = GlobalKey<RecordMapTabState>();
 
-  void _onNavTap(int index) {
+  Future<bool> _guardNavigation() async {
+    final status = _recordMapKey.currentState?.recordStatus ?? 'idle';
+    if (status == 'active') {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Active Measurement'),
+          content: const Text(
+            'Pause or finish the active measurement before leaving.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _onNavTap(int index) async {
+    if (index != 0 && _selectedIndex == 0) {
+      final allowed = await _guardNavigation();
+      if (!allowed) return;
+    }
     setState(() => _selectedIndex = index);
     // Refresh survey list whenever the tab is revealed
     if (index == 1) _surveysKey.currentState?.reload();
@@ -67,48 +96,60 @@ class _SurveyorWorkspaceScreenState extends State<SurveyorWorkspaceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final allowed = await _guardNavigation();
+        if (allowed && context.mounted) Navigator.pop(context);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: sensorXRed,
+          foregroundColor: Colors.white,
+          iconTheme: const IconThemeData(color: Colors.white),
+          actionsIconTheme: const IconThemeData(color: Colors.white),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(widget.surveyor.name),
+              _buildConnectionBadge(),
+            ],
+          ),
+        ),
+        body: IndexedStack(
+          index: _selectedIndex,
           children: [
-            Text(widget.surveyor.name),
-            _buildConnectionBadge(),
+            RecordMapTab(
+              key: _recordMapKey,
+              surveyor: widget.surveyor,
+              cache: widget.cache,
+            ),
+            _SurveysTab(
+              key: _surveysKey,
+              surveyor: widget.surveyor,
+              cache: widget.cache,
+              onMeasurementSelected: _activateMeasurementOnMap,
+            ),
           ],
         ),
-      ),
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: [
-          RecordMapTab(
-            key: _recordMapKey,
-            surveyor: widget.surveyor,
-            cache: widget.cache,
-          ),
-          _SurveysTab(
-            key: _surveysKey,
-            surveyor: widget.surveyor,
-            cache: widget.cache,
-            onMeasurementSelected: _activateMeasurementOnMap,
-          ),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: _onNavTap,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map),
-            label: 'Record / Map',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.folder_outlined),
-            selectedIcon: Icon(Icons.folder),
-            label: 'Surveys',
-          ),
-        ],
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _selectedIndex,
+          onDestinationSelected: _onNavTap,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.map_outlined),
+              selectedIcon: Icon(Icons.map),
+              label: 'Record / Map',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.folder_outlined),
+              selectedIcon: Icon(Icons.folder),
+              label: 'Surveys',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -262,7 +303,7 @@ class _SurveysTabState extends State<_SurveysTab> {
                 'Surveys',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: Colors.red.shade700,
+                      color: Colors.white,
                     ),
               ),
               const Spacer(),

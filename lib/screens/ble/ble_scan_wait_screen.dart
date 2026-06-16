@@ -30,7 +30,7 @@ class _BleScanWaitScreenState extends State<BleScanWaitScreen> {
       Permission.bluetoothConnect,
       Permission.location,
     ].request();
-    _timer = Timer(const Duration(seconds: 4), _navigate);
+    _timer = Timer(const Duration(seconds: 2), _navigate);
   }
 
   void _navigate() {

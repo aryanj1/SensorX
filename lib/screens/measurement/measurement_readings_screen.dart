@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:blu/app.dart';
 import 'package:blu/models/measurement.dart';
 import 'package:blu/models/reading.dart';
 import 'package:blu/services/database_service.dart';
@@ -63,6 +64,10 @@ class _MeasurementReadingsScreenState extends State<MeasurementReadingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: sensorXRed,
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
         title: Text(widget.measurement.name),
         actions: [
           IconButton(
