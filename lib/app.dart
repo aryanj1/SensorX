@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
-import 'package:blu/screens/home/home_screen.dart';
+import 'package:blu/screens/splash/splash_screen.dart';
+
+/// Top-level RouteObserver. Import this in any screen that needs RouteAware.
+final RouteObserver<ModalRoute<void>> routeObserver =
+    RouteObserver<ModalRoute<void>>();
 
 class App extends StatelessWidget {
   const App({super.key});
@@ -27,7 +31,8 @@ class App extends StatelessWidget {
           useMaterial3: true,
         ),
         themeMode: mode,
-        home: const HomeScreen(),
+        navigatorObservers: [routeObserver],
+        home: const SplashScreen(),
       ),
     );
   }

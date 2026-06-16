@@ -15,8 +15,14 @@ import 'package:blu/widgets/measurement_card.dart';
 class SurveyScreen extends StatefulWidget {
   final Survey survey;
   final TTLFileCache? cache;
+  final void Function(Measurement)? onMeasurementSelected;
 
-  const SurveyScreen({super.key, required this.survey, this.cache});
+  const SurveyScreen({
+    super.key,
+    required this.survey,
+    this.cache,
+    this.onMeasurementSelected,
+  });
 
   @override
   State<SurveyScreen> createState() => _SurveyScreenState();
@@ -243,9 +249,10 @@ class _SurveyScreenState extends State<SurveyScreen> {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Text(
             'Measurements',
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
           ),
         ),
         Expanded(
@@ -255,17 +262,22 @@ class _SurveyScreenState extends State<SurveyScreen> {
               return MeasurementCard(
                 measurement: _measurements[index],
                 onTap: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => MeasurementScreen(
-                        device: BleState.currentDevice,
-                        cache: widget.cache ?? BleState.currentCache,
-                        measurement: _measurements[index],
+                  if (widget.onMeasurementSelected != null) {
+                    widget.onMeasurementSelected!(_measurements[index]);
+                    Navigator.pop(context);
+                  } else {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MeasurementScreen(
+                          device: BleState.currentDevice,
+                          cache: widget.cache ?? BleState.currentCache,
+                          measurement: _measurements[index],
+                        ),
                       ),
-                    ),
-                  );
-                  await _loadMeasurements();
+                    );
+                    await _loadMeasurements();
+                  }
                 },
                 onViewReadings: () {
                   Navigator.push(

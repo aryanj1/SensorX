@@ -21,8 +21,14 @@ class MeasurementCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       child: ListTile(
-        title: Text(measurement.name, overflow: TextOverflow.ellipsis),
+        title: Text(
+          measurement.name,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

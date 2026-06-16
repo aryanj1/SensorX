@@ -14,7 +14,7 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
 
     <application
-        android:label="X-Survey"
+        android:label="X-ACT"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

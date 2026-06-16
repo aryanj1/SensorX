@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -8,9 +10,12 @@ import 'package:blu/models/surveyor.dart';
 import 'package:blu/services/ble_state.dart';
 import 'package:blu/services/cache_service.dart';
 import 'package:blu/services/database_service.dart';
+import 'package:blu/screens/ble/ble_scan_wait_screen.dart';
 import 'package:blu/screens/files/pending_files_screen.dart';
 import 'package:blu/screens/measurement/measurement_screen.dart';
-import 'package:blu/screens/surveyor/surveyor_screen.dart';
+import 'package:blu/screens/surveyor/surveyor_workspace_screen.dart';
+
+// routeObserver is declared in app.dart and imported via package:blu/app.dart.
 
 // ---------------------------------------------------------------------------
 // HomeScreen — surveyor list + navigation hub
@@ -108,6 +113,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       return;
                     }
                     final db = await DatabaseService.instance();
+                    final exists = await db.surveyorNameExists(name);
+                    if (exists) {
+                      setDialogState(
+                        () => nameError =
+                            'A surveyor named "$name" already exists',
+                      );
+                      return;
+                    }
                     await db.insertSurveyor(Surveyor(name: name));
                     if (!ctx.mounted) return;
                     Navigator.pop(ctx);
@@ -176,12 +189,19 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.bluetooth),
             tooltip: 'BLE Scanner',
             onPressed: _cacheReady
-                ? () => Navigator.push(
+                ? () {
+                    if (_cache == null) return;
+                    final connected = BleState.currentDevice != null &&
+                        BleState.currentDevice!.isConnected;
+                    Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => BLEScannerScreen(cache: _cache!),
+                        builder: (_) => connected
+                            ? BLEScannerScreen(cache: _cache!)
+                            : BleScanWaitScreen(cache: _cache!),
                       ),
-                    )
+                    );
+                  }
                 : null,
           ),
           IconButton(
@@ -221,9 +241,10 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Text(
             'Surveyors',
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
           ),
         ),
         Expanded(
@@ -233,8 +254,15 @@ class _HomeScreenState extends State<HomeScreen> {
               final s = _surveyors[index];
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                elevation: 3,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
                 child: ListTile(
-                  leading: const CircleAvatar(child: Icon(Icons.person)),
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.red.shade600,
+                    child: const Icon(Icons.person, color: Colors.white),
+                  ),
                   title: Text(s.name),
                   trailing: IconButton(
                     icon: const Icon(Icons.delete_outline),
@@ -246,7 +274,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (_) =>
-                            SurveyorScreen(surveyor: s, cache: _cache),
+                            SurveyorWorkspaceScreen(surveyor: s, cache: _cache),
                       ),
                     );
                     _loadData();
@@ -274,8 +302,11 @@ class BLEScannerScreen extends StatefulWidget {
   State<BLEScannerScreen> createState() => _BLEScannerScreenState();
 }
 
-class _BLEScannerScreenState extends State<BLEScannerScreen> {
+class _BLEScannerScreenState extends State<BLEScannerScreen> with RouteAware {
   final List<ScanResult> foundDevices = [];
+  StreamSubscription<bool>? _scanSub;
+  StreamSubscription<List<ScanResult>>? _resultsSub;
+  BluetoothDevice? _connectedDevice;
 
   // Convenience getter — HomeScreen guarantees cache is ready before push.
   TTLFileCache get _cache => widget.cache;
@@ -283,7 +314,26 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> {
   @override
   void initState() {
     super.initState();
+    _connectedDevice = BleState.currentDevice;
     _startBLEScan();
+    _scanSub = FlutterBluePlus.isScanning.listen((scanning) {
+      if (!scanning && mounted) setState(() => foundDevices.clear());
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null) {
+      routeObserver.subscribe(this, route);
+    }
+  }
+
+  /// Fired when the user pops back to this page from a pushed route.
+  @override
+  void didPopNext() {
+    if (mounted) setState(() => _connectedDevice = BleState.currentDevice);
   }
 
   Future<void> _startBLEScan() async {
@@ -295,14 +345,68 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> {
       }
     }
     foundDevices.clear();
-    FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
-    FlutterBluePlus.scanResults.listen((results) {
+    FlutterBluePlus.startScan();
+    _resultsSub = FlutterBluePlus.scanResults.listen((results) {
       for (ScanResult r in results) {
+        if (!_isLikelySensor(r)) continue;
         if (!foundDevices.any((d) => d.device.remoteId == r.device.remoteId)) {
           if (mounted) setState(() => foundDevices.add(r));
         }
       }
     });
+  }
+
+  /// Returns true if the device is likely an embedded sensor (not a consumer device).
+  bool _isLikelySensor(ScanResult r) {
+    const consumerKeywords = [
+      'iphone',
+      'ipad',
+      'macbook',
+      'mac mini',
+      'mac pro',
+      'imac',
+      'airpods',
+      'beats',
+      'samsung',
+      'galaxy',
+      'pixel',
+      'huawei',
+      'oneplus',
+      'xiaomi',
+      'oppo',
+      'realme',
+      'vivo',
+      'honor',
+      'headphones',
+      'earbuds',
+      'earphone',
+      'buds',
+      'jbl',
+      'bose',
+      'sony',
+      'jabra',
+      'sennheiser',
+      'skullcandy',
+      'watch',
+      'band',
+      'fitbit',
+      'garmin',
+      'keyboard',
+      'mouse',
+      'trackpad',
+      'tv ',
+      ' tv',
+      'television',
+      'roku',
+      'fire tv',
+      'laptop',
+      'thinkpad',
+      'surface',
+    ];
+    final name = r.device.platformName.toLowerCase().trim();
+    // Keep unnamed devices — likely embedded sensors.
+    if (name.isEmpty) return true;
+    return !consumerKeywords.any((kw) => name.contains(kw));
   }
 
   Future<void> _requestPermissions() async {
@@ -314,14 +418,138 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> {
     ].request();
   }
 
-  void _connectAndShowData(BluetoothDevice device) {
+  Future<void> _disconnectCurrentDevice() async {
+    final device = BleState.currentDevice;
+    if (device != null) {
+      try {
+        await device.disconnect();
+      } catch (_) {}
+      BleState.currentDevice = null;
+      BleState.currentCache = null;
+      _connectedDevice = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    routeObserver.unsubscribe(this);
+    _scanSub?.cancel();
+    _resultsSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _connectAndShowData(BluetoothDevice device) async {
+    if (!device.isConnected) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const AlertDialog(
+          content: Padding(
+            padding: EdgeInsets.all(8.0),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text('Connecting...'),
+              ],
+            ),
+          ),
+        ),
+      );
+      try {
+        await device.connect(timeout: const Duration(seconds: 15));
+        if (!mounted) return;
+        Navigator.pop(context);
+      } catch (e) {
+        if (!mounted) return;
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Connection failed: ${e.toString()}')),
+        );
+        return;
+      }
+    }
+    if (!mounted) return;
     BleState.currentDevice = device;
     BleState.currentCache = _cache;
+    if (mounted) setState(() => _connectedDevice = device);
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => MeasurementScreen(device: device, cache: _cache),
       ),
+    );
+  }
+
+  Widget _buildConnectedDeviceSection() {
+    final device = _connectedDevice;
+    if (device == null) return const SizedBox.shrink();
+    return StreamBuilder<BluetoothConnectionState>(
+      stream: device.connectionState,
+      initialData: device.isConnected
+          ? BluetoothConnectionState.connected
+          : BluetoothConnectionState.disconnected,
+      builder: (ctx, snap) {
+        final isConnected = snap.data == BluetoothConnectionState.connected;
+        if (!isConnected && !device.isConnected) return const SizedBox.shrink();
+        final name = device.platformName.isNotEmpty
+            ? device.platformName
+            : device.remoteId.toString();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 20, 16, 8),
+              child: Text(
+                'CONNECTED DEVICE',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2C2C2E),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: ListTile(
+                title: Text(
+                  name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                subtitle: const Text(
+                  'Connected',
+                  style: TextStyle(color: Colors.green),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.green),
+                    IconButton(
+                      icon: const Icon(Icons.close,
+                          color: Colors.white54, size: 20),
+                      onPressed: () async {
+                        await _disconnectCurrentDevice();
+                        if (mounted) setState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                onTap: () => _connectAndShowData(device),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -334,8 +562,14 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF1C1C1E),
       appBar: AppBar(
-        title: const Text('BLE Scanner'),
+        title: const Text(
+          'Bluetooth',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: const Color(0xFF1C1C1E),
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
             icon: const Icon(Icons.folder),
@@ -344,24 +578,113 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> {
           ),
         ],
       ),
-      body: foundDevices.isEmpty
-          ? const Center(child: Text('Scanning for BLE devices...'))
-          : ListView.builder(
-              itemCount: foundDevices.length,
-              itemBuilder: (context, index) {
-                final device = foundDevices[index].device;
-                return ListTile(
-                  title: Text(
-                    device.platformName.isNotEmpty
-                        ? device.platformName
-                        : '(Unknown Device)',
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Scanning toggle
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2C2C2E),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: StreamBuilder<bool>(
+              stream: FlutterBluePlus.isScanning,
+              builder: (ctx, snap) {
+                final scanning = snap.data ?? false;
+                return SwitchListTile(
+                  title: const Text(
+                    'Bluetooth Scanning',
+                    style: TextStyle(color: Colors.white),
                   ),
-                  subtitle: Text(device.remoteId.str),
-                  trailing: Text('${foundDevices[index].rssi} dBm'),
-                  onTap: () => _connectAndShowData(device),
+                  value: scanning,
+                  activeColor: Colors.red,
+                  onChanged: (v) async {
+                    if (v) {
+                      _startBLEScan();
+                    } else {
+                      FlutterBluePlus.stopScan();
+                      await _disconnectCurrentDevice();
+                      if (mounted) setState(() => foundDevices.clear());
+                    }
+                  },
                 );
               },
             ),
+          ),
+          // Connected device section
+          _buildConnectedDeviceSection(),
+          // Section header
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 16, 8),
+            child: Text(
+              'AVAILABLE DEVICES',
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+          // Device list
+          Expanded(
+            child: foundDevices.isEmpty
+                ? const Center(
+                    child: Text(
+                      'No devices found',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: foundDevices.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (ctx, i) {
+                      final device = foundDevices[i].device;
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2C2C2E),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: ListTile(
+                          title: Text(
+                            device.platformName.isNotEmpty
+                                ? device.platformName
+                                : device.remoteId.toString(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          subtitle: StreamBuilder<BluetoothConnectionState>(
+                            stream: device.connectionState,
+                            builder: (ctx, snap) {
+                              final state = snap.data ??
+                                  BluetoothConnectionState.disconnected;
+                              final isConnected =
+                                  state == BluetoothConnectionState.connected;
+                              return Text(
+                                isConnected ? 'Connected' : 'Not Connected',
+                                style: TextStyle(
+                                  color:
+                                      isConnected ? Colors.green : Colors.grey,
+                                ),
+                              );
+                            },
+                          ),
+                          trailing: const Icon(
+                            Icons.info_outline,
+                            color: Colors.grey,
+                          ),
+                          onTap: () => _connectAndShowData(device),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

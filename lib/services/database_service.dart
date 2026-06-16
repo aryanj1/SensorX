@@ -1,8 +1,10 @@
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+import 'package:blu/models/leak_mark.dart';
 import 'package:blu/models/measurement.dart';
 import 'package:blu/models/media_file.dart';
+import 'package:blu/models/note.dart';
 import 'package:blu/models/reading.dart';
 import 'package:blu/models/survey.dart';
 import 'package:blu/models/surveyor.dart';
@@ -25,7 +27,7 @@ class DatabaseService {
     final path = p.join(dbPath, 'blu_surveys.db');
     return openDatabase(
       path,
-      version: 3,
+      version: 5,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
@@ -91,6 +93,27 @@ class DatabaseService {
         longitude       REAL
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE notes (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        measurement_id  INTEGER NOT NULL REFERENCES measurements(id) ON DELETE CASCADE,
+        text            TEXT NOT NULL,
+        created_at      TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE leak_marks (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        measurement_id  INTEGER NOT NULL REFERENCES measurements(id) ON DELETE CASCADE,
+        timestamp       TEXT NOT NULL,
+        latitude        REAL,
+        longitude       REAL,
+        note            TEXT,
+        media_path      TEXT
+      )
+    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -141,6 +164,27 @@ class DatabaseService {
         )
       ''');
     }
+
+    if (oldVersion < 4) {
+      await db.execute('''CREATE TABLE IF NOT EXISTS notes (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        measurement_id INTEGER NOT NULL REFERENCES measurements(id) ON DELETE CASCADE,
+        text           TEXT NOT NULL,
+        created_at     TEXT NOT NULL
+      )''');
+    }
+
+    if (oldVersion < 5) {
+      await db.execute('''CREATE TABLE IF NOT EXISTS leak_marks (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        measurement_id INTEGER NOT NULL REFERENCES measurements(id) ON DELETE CASCADE,
+        timestamp      TEXT NOT NULL,
+        latitude       REAL,
+        longitude      REAL,
+        note           TEXT,
+        media_path     TEXT
+      )''');
+    }
   }
 
   Database get _database => _db!;
@@ -151,6 +195,30 @@ class DatabaseService {
 
   Future<int> insertSurveyor(Surveyor surveyor) async {
     return _database.insert('surveyors', {'name': surveyor.name});
+  }
+
+  Future<bool> surveyorNameExists(String name) async {
+    final result = await _database.rawQuery(
+      "SELECT COUNT(*) as c FROM surveyors WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))",
+      [name],
+    );
+    return Sqflite.firstIntValue(result)! > 0;
+  }
+
+  Future<bool> surveyNameExistsForSurveyor(int surveyorId, String name) async {
+    final result = await _database.rawQuery(
+      "SELECT COUNT(*) as c FROM surveys WHERE surveyor_id = ? AND LOWER(TRIM(name)) = LOWER(TRIM(?))",
+      [surveyorId, name],
+    );
+    return Sqflite.firstIntValue(result)! > 0;
+  }
+
+  Future<bool> measurementNameExistsForSurvey(int surveyId, String name) async {
+    final result = await _database.rawQuery(
+      "SELECT COUNT(*) as c FROM measurements WHERE survey_id = ? AND LOWER(TRIM(name)) = LOWER(TRIM(?))",
+      [surveyId, name],
+    );
+    return Sqflite.firstIntValue(result)! > 0;
   }
 
   Future<List<Surveyor>> getAllSurveyors() async {
@@ -349,5 +417,59 @@ class DatabaseService {
       [surveyId],
     );
     return rows.map(MediaFile.fromMap).toList();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Note CRUD
+  // ---------------------------------------------------------------------------
+
+  Future<int> insertNote(Note note) async {
+    return _database.insert('notes', note.toMap());
+  }
+
+  Future<List<Note>> getNotesForMeasurement(int measurementId) async {
+    final rows = await _database.query(
+      'notes',
+      where: 'measurement_id = ?',
+      whereArgs: [measurementId],
+      orderBy: 'created_at ASC',
+    );
+    return rows.map(Note.fromMap).toList();
+  }
+
+  Future<int> deleteNote(int id) async {
+    return _database.delete('notes', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ── LeakMark CRUD ──────────────────────────────────────────────────────────
+
+  Future<int> insertLeakMark(LeakMark lm) async {
+    final db = _database;
+    return db.insert('leak_marks', lm.toMap());
+  }
+
+  Future<List<LeakMark>> getLeakMarksForMeasurement(int measurementId) async {
+    final db = _database;
+    final rows = await db.query(
+      'leak_marks',
+      where: 'measurement_id = ?',
+      whereArgs: [measurementId],
+    );
+    return rows.map(LeakMark.fromMap).toList();
+  }
+
+  Future<List<LeakMark>> getLeakMarksForSurvey(int surveyId) async {
+    final db = _database;
+    final rows = await db.rawQuery('''
+      SELECT lm.* FROM leak_marks lm
+      INNER JOIN measurements m ON lm.measurement_id = m.id
+      WHERE m.survey_id = ?
+    ''', [surveyId]);
+    return rows.map(LeakMark.fromMap).toList();
+  }
+
+  Future<int> deleteLeakMark(int id) async {
+    final db = _database;
+    return db.delete('leak_marks', where: 'id = ?', whereArgs: [id]);
   }
 }

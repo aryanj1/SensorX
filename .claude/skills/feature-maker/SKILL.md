@@ -4,7 +4,6 @@ description: >
   Explicit orchestration skill for Flutter BLE/GPS app feature work, bug fixes,
   quality checks, and APK builds using verified specialist subagents.
 argument-hint: "[phase-0|new-feature|bug-fix|release-apk] [task]" 
-disable-model-invocation: true
 ---
 
 # Feature Maker Skill
