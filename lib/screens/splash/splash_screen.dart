@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -12,35 +13,27 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _progress;
+class _SplashScreenState extends State<SplashScreen> {
   late String _randomFact;
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
     _randomFact = kSensorFacts[math.Random().nextInt(kSensorFacts.length)];
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 10),
-    );
-    _progress = _ctrl.drive(Tween<double>(begin: 0, end: 1));
-    _ctrl.addStatusListener((status) {
-      if (status == AnimationStatus.completed && mounted) {
+    _timer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const HomeScreen()),
         );
       }
     });
-    _ctrl.forward();
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _timer?.cancel();
     super.dispose();
   }
 
@@ -51,12 +44,10 @@ class _SplashScreenState extends State<SplashScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Fullscreen background PNG ─────────────────────────
           Image.asset(
             'assets/images/splash_logo.png',
             fit: BoxFit.cover,
           ),
-          // ── Loading bar + fact: below logo, inside radial circle
           Align(
             alignment: const Alignment(0, 0.45),
             child: Padding(
@@ -64,19 +55,11 @@ class _SplashScreenState extends State<SplashScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  AnimatedBuilder(
-                    animation: _progress,
-                    builder: (_, __) => SizedBox(
-                      height: 3,
-                      child: LinearProgressIndicator(
-                        value: _progress.value,
-                        backgroundColor: Colors.white24,
-                        valueColor:
-                            const AlwaysStoppedAnimation<Color>(Colors.red),
-                      ),
-                    ),
+                  const CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2.5,
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 20),
                   Text(
                     _randomFact,
                     textAlign: TextAlign.center,

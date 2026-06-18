@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -11,7 +12,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-import 'package:blu/app.dart';
+import 'package:blu/services/threshold_notification_service.dart';
+
 import 'package:blu/models/leak_mark.dart';
 import 'package:blu/models/measurement.dart';
 import 'package:blu/models/media_file.dart';
@@ -24,7 +26,7 @@ import 'package:blu/services/ble_state.dart';
 import 'package:blu/services/cache_service.dart';
 import 'package:blu/services/database_service.dart';
 import 'package:blu/services/storage_check_service.dart';
-import 'package:blu/widgets/workload_sheet.dart';
+import 'package:blu/widgets/start_measurement_sheet.dart';
 
 class RecordMapTab extends StatefulWidget {
   final Surveyor surveyor;
@@ -36,9 +38,19 @@ class RecordMapTab extends StatefulWidget {
   State<RecordMapTab> createState() => RecordMapTabState();
 }
 
-class RecordMapTabState extends State<RecordMapTab> {
+class RecordMapTabState extends State<RecordMapTab>
+    with WidgetsBindingObserver {
   static final _serviceUUID = Guid('4fafc201-1fb5-459e-8fcc-c5c9c331914b');
   static final _charUUID = Guid('beb5483e-36e1-4688-b7f5-ea07361b26a8');
+
+  // GPS path filter constants
+  static const double _kMaxAccuracyMetres = 30.0;
+  static const double _kMaxSpeedMs = 15.0; // 54 km/h — rejects GPS jumps
+  static const double _kMinDistanceMetres = 2.0; // suppresses stationary jitter
+
+  // GPS path filter bookkeeping
+  LatLng? _lastAcceptedPoint;
+  DateTime? _lastAcceptedTime;
 
   // BLE
   StreamSubscription<BluetoothConnectionState>? _connSub;
@@ -50,7 +62,6 @@ class RecordMapTabState extends State<RecordMapTab> {
   StreamSubscription<Position>? _positionStream;
   double? _lat;
   double? _lng;
-  String? _gpsUtcIso;
   final MapController _mapController = MapController();
   List<LatLng> _routePoints = [];
   List<LatLng> _leakMarkerPoints = [];
@@ -69,6 +80,8 @@ class RecordMapTabState extends State<RecordMapTab> {
   bool _alarmEnabled = true;
   double _threshold = 50.0;
   DateTime? _lastAlarmTime;
+  AppLifecycleState _lifecycleState = AppLifecycleState.resumed;
+  bool _alertDialogVisible = false;
 
   // Legacy CSV cache
   String? _sessionFile;
@@ -92,8 +105,43 @@ class RecordMapTabState extends State<RecordMapTab> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initLocation();
     _connectBle();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleState = state;
+  }
+
+  // ── GPS path filter helpers ───────────────────────────────────────────────
+
+  bool _shouldAcceptPoint(Position pos) {
+    final lat = pos.latitude;
+    final lng = pos.longitude;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+    if (pos.accuracy > _kMaxAccuracyMetres) return false;
+    final candidate = LatLng(lat, lng);
+    if (_lastAcceptedPoint != null && _lastAcceptedTime != null) {
+      final distM = _haversineMetres(_lastAcceptedPoint!, candidate);
+      if (distM < _kMinDistanceMetres) return false;
+      final elapsedSec =
+          DateTime.now().difference(_lastAcceptedTime!).inMilliseconds / 1000.0;
+      if (elapsedSec > 0 && distM / elapsedSec > _kMaxSpeedMs) return false;
+    }
+    return true;
+  }
+
+  static double _haversineMetres(LatLng a, LatLng b) {
+    const r = 6371000.0;
+    final dLat = (b.latitude - a.latitude) * math.pi / 180;
+    final dLng = (b.longitude - a.longitude) * math.pi / 180;
+    final lat1 = a.latitude * math.pi / 180;
+    final lat2 = b.latitude * math.pi / 180;
+    final h = math.pow(math.sin(dLat / 2), 2) +
+        math.cos(lat1) * math.cos(lat2) * math.pow(math.sin(dLng / 2), 2);
+    return 2 * r * math.asin(math.sqrt(h.toDouble()));
   }
 
   // ── Location ──────────────────────────────────────────────────────────────
@@ -109,7 +157,6 @@ class RecordMapTabState extends State<RecordMapTab> {
       setState(() {
         _lat = pos.latitude;
         _lng = pos.longitude;
-        _gpsUtcIso = pos.timestamp.toUtc().toIso8601String();
       });
       try {
         _mapController.move(LatLng(pos.latitude, pos.longitude), 16);
@@ -126,7 +173,6 @@ class RecordMapTabState extends State<RecordMapTab> {
       setState(() {
         _lat = pos.latitude;
         _lng = pos.longitude;
-        _gpsUtcIso = pos.timestamp.toUtc().toIso8601String();
       });
       if (!_userHasMovedMap) {
         try {
@@ -137,9 +183,14 @@ class RecordMapTabState extends State<RecordMapTab> {
         } catch (_) {}
       }
       if (_recordStatus == 'active') {
-        setState(() {
-          _routePoints.add(LatLng(pos.latitude, pos.longitude));
-        });
+        if (_shouldAcceptPoint(pos)) {
+          final accepted = LatLng(pos.latitude, pos.longitude);
+          _lastAcceptedPoint = accepted;
+          _lastAcceptedTime = DateTime.now();
+          setState(() {
+            _routePoints.add(accepted);
+          });
+        }
       }
     });
   }
@@ -184,7 +235,7 @@ class RecordMapTabState extends State<RecordMapTab> {
     final raw = _parseCSV(String.fromCharCodes(value).trim());
     if (raw.isEmpty) return;
 
-    final gpsUtc = _gpsUtcIso ?? DateTime.now().toUtc().toIso8601String();
+    final gpsUtc = DateTime.now().toUtc().toIso8601String();
 
     if (!mounted) return;
     setState(() {
@@ -214,7 +265,7 @@ class RecordMapTabState extends State<RecordMapTab> {
     }
 
     final methane = double.tryParse(raw['Methane (ppm)'] ?? '0') ?? 0.0;
-    if (_alarmEnabled && methane > _threshold) _triggerAlarm();
+    if (_alarmEnabled && methane > _threshold) _triggerAlarm(methane);
   }
 
   Map<String, String> _parseCSV(String line) {
@@ -276,16 +327,46 @@ class RecordMapTabState extends State<RecordMapTab> {
     } catch (_) {}
   }
 
-  void _triggerAlarm() async {
+  void _triggerAlarm(double ppm) async {
     final now = DateTime.now();
     if (_lastAlarmTime != null &&
-        now.difference(_lastAlarmTime!) < const Duration(seconds: 10)) {
+        now.difference(_lastAlarmTime!) < const Duration(seconds: 30)) {
       return;
     }
     _lastAlarmTime = now;
     try {
       await _player.play(AssetSource('alert.mp3'));
     } catch (_) {}
+    if (_lifecycleState == AppLifecycleState.resumed) {
+      _showThresholdDialog(ppm);
+    } else {
+      ThresholdNotificationService.showAlert(ppm);
+    }
+  }
+
+  void _showThresholdDialog(double ppm) {
+    if (!mounted || _alertDialogVisible) return;
+    _alertDialogVisible = true;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Threshold Alert'),
+        content: Text(
+          'Threshold ${ppm.toStringAsFixed(0)}(ppm) crossed. Review ASAP!',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              _player.stop();
+              setState(() => _alertDialogVisible = false);
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Recording controls ────────────────────────────────────────────────────
@@ -303,306 +384,142 @@ class RecordMapTabState extends State<RecordMapTab> {
   }
 
   Future<void> _showStartDialog() async {
-    final nameCtrl = TextEditingController();
-    final surveyNameCtrl = TextEditingController();
-    String mode = 'existing';
-    Survey? selectedSurvey;
-    List<Survey> surveys = [];
-    String? nameError;
-    String? surveyError;
+    // Pre-load surveys for this surveyor
+    final db = await DatabaseService.instance();
+    final surveys = await db.getSurveysForSurveyor(widget.surveyor.id!);
+    if (!mounted) return;
 
-    try {
-      final db = await DatabaseService.instance();
-      surveys = await db.getSurveysForSurveyor(widget.surveyor.id!);
-    } catch (_) {}
+    final result = await showModalBottomSheet<StartMeasurementResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => StartMeasurementSheet(surveys: surveys),
+    );
+    if (result == null || !mounted) return;
+
+    // Resolve survey
+    int surveyId;
+    String surveyName;
+    Survey targetSurvey;
+    if (result.existingSurveyId != null) {
+      targetSurvey = surveys.firstWhere((s) => s.id == result.existingSurveyId);
+      surveyId = targetSurvey.id!;
+      surveyName = targetSurvey.name;
+    } else {
+      // Check for duplicate survey name
+      final exists = await db.surveyNameExistsForSurveyor(
+        widget.surveyor.id!,
+        result.newSurveyName!,
+      );
+      if (!mounted) return;
+      if (exists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Survey "${result.newSurveyName}" already exists'),
+          ),
+        );
+        return;
+      }
+      surveyId = await db.insertSurvey(Survey(
+        name: result.newSurveyName!,
+        surveyorName: widget.surveyor.name,
+        surveyorId: widget.surveyor.id,
+        createdAt: DateTime.now().toUtc().toIso8601String(),
+      ));
+      if (!mounted) return;
+      surveyName = result.newSurveyName!;
+      targetSurvey = Survey(
+        id: surveyId,
+        name: surveyName,
+        surveyorName: widget.surveyor.name,
+        surveyorId: widget.surveyor.id,
+        createdAt: DateTime.now().toUtc().toIso8601String(),
+      );
+    }
+
+    // Duplicate measurement name check
+    final measExists = await db.measurementNameExistsForSurvey(
+      surveyId,
+      result.measurementName,
+    );
+    if (!mounted) return;
+    if (measExists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Measurement "${result.measurementName}" already exists in this survey',
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Storage check
+    final storageResult = await StorageCheckService.check(
+      photos: result.expectedPhotos,
+      videos: result.expectedVideos,
+    );
+    if (!mounted) return;
+
+    if (storageResult.needsWarning) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dCtx) => AlertDialog(
+          title: const Text('Storage almost full'),
+          content: const Text(
+            'Storage is almost finished. Photos and videos may be lost if you continue.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dCtx, false),
+              child: const Text('Leave'),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: () => Navigator.pop(dCtx, true),
+              child: const Text('Continue anyway'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || proceed != true) return;
+    }
+
+    // Create measurement and go active
+    final startedAt = DateTime.now().toUtc().toIso8601String();
+    final mId = await db.insertMeasurement(
+      Measurement(
+        surveyId: surveyId,
+        name: result.measurementName,
+        status: 'active',
+        startedAt: startedAt,
+        expectedJoints: result.expectedJoints,
+        expectedPhotos: result.expectedPhotos,
+        expectedVideos: result.expectedVideos,
+      ),
+    );
 
     if (!mounted) return;
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            24,
-            24,
-            24,
-            24 + MediaQuery.of(ctx).viewInsets.bottom,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Start Recording',
-                style: Theme.of(ctx).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: nameCtrl,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: 'Measurement name *',
-                  border: const OutlineInputBorder(),
-                  errorText: nameError,
-                ),
-                onChanged: (_) => setSheet(() => nameError = null),
-              ),
-              const SizedBox(height: 16),
-              // Survey target toggle
-              Row(
-                children: [
-                  Expanded(
-                    child: ChoiceChip(
-                      label: const Text('Existing Survey'),
-                      selected: mode == 'existing',
-                      onSelected: (_) => setSheet(() {
-                        mode = 'existing';
-                        surveyError = null;
-                      }),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ChoiceChip(
-                      label: const Text('New Survey'),
-                      selected: mode == 'new',
-                      onSelected: (_) => setSheet(() {
-                        mode = 'new';
-                        surveyError = null;
-                      }),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (mode == 'existing')
-                surveys.isEmpty
-                    ? const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 8),
-                        child: Text(
-                          'No surveys yet — switch to "New Survey" to create one.',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      )
-                    : DropdownButtonFormField<Survey>(
-                        value: selectedSurvey,
-                        decoration: InputDecoration(
-                          labelText: 'Select survey',
-                          border: const OutlineInputBorder(),
-                          errorText: surveyError,
-                        ),
-                        items: surveys
-                            .map(
-                              (s) => DropdownMenuItem(
-                                value: s,
-                                child: Text(s.name),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) => setSheet(() {
-                          selectedSurvey = v;
-                          surveyError = null;
-                        }),
-                      )
-              else
-                TextField(
-                  controller: surveyNameCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'New survey name *',
-                    border: const OutlineInputBorder(),
-                    errorText: surveyError,
-                  ),
-                  onChanged: (_) => setSheet(() => surveyError = null),
-                ),
-              const SizedBox(height: 20),
-              FilledButton.icon(
-                icon: const Icon(Icons.play_arrow),
-                label: const Text(
-                  'Start Recording',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 52),
-                  backgroundColor: Colors.green.shade600,
-                  shape: const StadiumBorder(),
-                ),
-                onPressed: () async {
-                  final name = nameCtrl.text.trim();
-                  bool valid = true;
-                  if (name.isEmpty) {
-                    setSheet(() => nameError = 'Required');
-                    valid = false;
-                  }
-                  if (mode == 'existing') {
-                    if (surveys.isEmpty) {
-                      setSheet(
-                        () => surveyError = 'No surveys — switch to New Survey',
-                      );
-                      valid = false;
-                    } else if (selectedSurvey == null) {
-                      setSheet(() => surveyError = 'Select a survey');
-                      valid = false;
-                    }
-                  } else if (surveyNameCtrl.text.trim().isEmpty) {
-                    setSheet(() => surveyError = 'Survey name required');
-                    valid = false;
-                  }
-                  if (!valid) return;
-
-                  try {
-                    final db = await DatabaseService.instance();
-                    final Survey targetSurvey;
-                    if (mode == 'new') {
-                      final surveyName = surveyNameCtrl.text.trim();
-                      // Check duplicate survey name for this surveyor
-                      if (widget.surveyor.id != null) {
-                        final surveyExists =
-                            await db.surveyNameExistsForSurveyor(
-                          widget.surveyor.id!,
-                          surveyName,
-                        );
-                        if (surveyExists) {
-                          setSheet(
-                            () => surveyError =
-                                'A survey named "$surveyName" already exists',
-                          );
-                          return;
-                        }
-                      }
-                      final newId = await db.insertSurvey(
-                        Survey(
-                          name: surveyName,
-                          surveyorName: widget.surveyor.name,
-                          surveyorId: widget.surveyor.id,
-                          createdAt: DateTime.now().toUtc().toIso8601String(),
-                        ),
-                      );
-                      targetSurvey = Survey(
-                        id: newId,
-                        name: surveyName,
-                        surveyorName: widget.surveyor.name,
-                        surveyorId: widget.surveyor.id,
-                        createdAt: DateTime.now().toUtc().toIso8601String(),
-                      );
-                    } else {
-                      targetSurvey = selectedSurvey!;
-                    }
-
-                    // Check duplicate measurement name for the target survey
-                    final measExists = await db.measurementNameExistsForSurvey(
-                      targetSurvey.id!,
-                      name,
-                    );
-                    if (measExists) {
-                      setSheet(
-                        () => nameError =
-                            'A measurement named "$name" already exists',
-                      );
-                      return;
-                    }
-
-                    // Pop the start dialog before showing the workload sheet.
-                    if (!ctx.mounted) return;
-                    Navigator.pop(ctx);
-                    if (!mounted) return;
-
-                    // Step 1: collect workload expectations.
-                    final workload = await showModalBottomSheet<WorkloadResult>(
-                      context: context,
-                      isScrollControlled: true,
-                      shape: const RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.vertical(top: Radius.circular(20)),
-                      ),
-                      builder: (_) => const WorkloadSheet(),
-                    );
-                    if (workload == null) return;
-                    if (!mounted) return;
-
-                    // Step 2: check available storage.
-                    final checkResult = await StorageCheckService.check(
-                      photos: workload.photos,
-                      videos: workload.videos,
-                    );
-                    if (!mounted) return;
-
-                    // Step 3: warn user if storage may be insufficient.
-                    if (checkResult.needsWarning) {
-                      final proceed = await showDialog<bool>(
-                        context: context,
-                        barrierDismissible: false,
-                        builder: (dCtx) => AlertDialog(
-                          title: const Text('Storage almost full'),
-                          content: const Text(
-                            'Storage is almost finished. Photos and videos may be lost if you continue.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(dCtx, false),
-                              child: const Text('Leave'),
-                            ),
-                            TextButton(
-                              style: TextButton.styleFrom(
-                                foregroundColor: Colors.red,
-                              ),
-                              onPressed: () => Navigator.pop(dCtx, true),
-                              child: const Text('Continue anyway'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (proceed != true) return;
-                    }
-                    if (!mounted) return;
-
-                    // Step 4: create the measurement now that all checks pass.
-                    final startedAt = DateTime.now().toUtc().toIso8601String();
-                    final mId = await db.insertMeasurement(
-                      Measurement(
-                        surveyId: targetSurvey.id!,
-                        name: name,
-                        status: 'active',
-                        startedAt: startedAt,
-                        expectedJoints: workload.joints,
-                        expectedPhotos: workload.photos,
-                        expectedVideos: workload.videos,
-                      ),
-                    );
-
-                    if (!mounted) return;
-
-                    setState(() {
-                      _recordStatus = 'active';
-                      _activeSurvey = targetSurvey;
-                      _activeMeasurement = Measurement(
-                        id: mId,
-                        surveyId: targetSurvey.id!,
-                        name: name,
-                        status: 'active',
-                        startedAt: startedAt,
-                        expectedJoints: workload.joints,
-                        expectedPhotos: workload.photos,
-                        expectedVideos: workload.videos,
-                      );
-                    });
-                    _stopwatch
-                      ..reset()
-                      ..start();
-                    _startTicker();
-                  } catch (e) {
-                    if (ctx.mounted) setSheet(() => surveyError = 'Error: $e');
-                  }
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    setState(() {
+      _recordStatus = 'active';
+      _activeSurvey = targetSurvey;
+      _activeMeasurement = Measurement(
+        id: mId,
+        surveyId: surveyId,
+        name: result.measurementName,
+        status: 'active',
+        startedAt: startedAt,
+        expectedJoints: result.expectedJoints,
+        expectedPhotos: result.expectedPhotos,
+        expectedVideos: result.expectedVideos,
+      );
+    });
+    _stopwatch
+      ..reset()
+      ..start();
+    _startTicker();
   }
 
   Future<void> _pauseRecording() async {
@@ -658,6 +575,8 @@ class RecordMapTabState extends State<RecordMapTab> {
   void _resetForNewRecording() {
     _stopwatch.reset();
     _leakNoteCtrl.clear();
+    _lastAcceptedPoint = null;
+    _lastAcceptedTime = null;
     setState(() {
       _recordStatus = 'idle';
       _activeMeasurement = null;
@@ -667,6 +586,7 @@ class RecordMapTabState extends State<RecordMapTab> {
       _showLeakOverlay = false;
       _leakPickedMediaPath = null;
       _userHasMovedMap = false;
+      _alertDialogVisible = false;
     });
   }
 
@@ -704,6 +624,8 @@ class RecordMapTabState extends State<RecordMapTab> {
     _stopwatch.reset();
     _ticker?.cancel();
     _userHasMovedMap = false;
+    _lastAcceptedPoint = null;
+    _lastAcceptedTime = null;
     setState(() {
       _activeMeasurement = m;
       _recordStatus = m.status == 'active'
@@ -727,6 +649,7 @@ class RecordMapTabState extends State<RecordMapTab> {
         _showLeakOverlay = false;
         _leakPickedMediaPath = null;
         _notes = [];
+        _alertDialogVisible = false;
       });
     }
     if (m.id != null) {
@@ -1009,6 +932,7 @@ class RecordMapTabState extends State<RecordMapTab> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _noteCtrl.dispose();
     _leakNoteCtrl.dispose();
     _positionStream?.cancel();
@@ -1076,8 +1000,18 @@ class RecordMapTabState extends State<RecordMapTab> {
               polylines: [
                 Polyline(
                   points: _routePoints,
-                  color: sensorXRed,
-                  strokeWidth: 4.0,
+                  color: const Color(0x55000000),
+                  strokeWidth: 7.0,
+                ),
+              ],
+            ),
+          if (_routePoints.length >= 2)
+            PolylineLayer(
+              polylines: [
+                Polyline(
+                  points: _routePoints,
+                  color: const Color(0xFF7d0d0d),
+                  strokeWidth: 4.5,
                 ),
               ],
             ),

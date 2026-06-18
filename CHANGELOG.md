@@ -4,7 +4,32 @@ All meaningful completed changes to this Flutter BLE/GPS gas surveyor app will b
 
 Format follows: Added, Changed, Fixed, Known Issues.
 
+## [Unreleased] — 2026-06-18
+
+### Added
+- GPS path filter on the Record/Map screen: live path points are now validated before being added to the polyline. Points are rejected if lat/lng is out of bounds, GPS accuracy exceeds 30 m, the point is within 2 m of the last accepted point (stationary jitter suppression), or the implied travel speed exceeds 15 m/s (GPS jump/teleport rejection). Filtering is display-only — SQLite reading inserts are unaffected.
+- Path restore on measurement open: opening a Paused, Stopped, or Active measurement from the Measurements list now loads and displays the full path already traversed from saved readings before any user action. Resuming a Paused measurement continues the path from where it left off.
+
+### Changed
+- Survey path polyline upgraded to a double-layer rendering: a dark semi-transparent outline (Color 0x55000000, 7 dp) drawn beneath a brand-red stroke (Color 0xFF7d0d0d, 4.5 dp) for a cleaner, Strava-style appearance with better map contrast.
+- Export reading order hardened: `getReadingsForMeasurement` now orders by `gps_utc ASC, id ASC` instead of `id ASC` only, ensuring deterministic chronological order for event-to-row mapping regardless of insertion order.
+
+## [Unreleased] — 2026-06-16
+
+### Fixed
+- Fixed core timestamp bug: every BLE sensor reading now stores its own unique UTC timestamp (`DateTime.now().toUtc()` at packet receipt) instead of reusing the stale GPS position timestamp. Previously, all readings between GPS position events shared the same timestamp, breaking event-to-row mapping for notes, media, and leak marks on export.
+- ZIP export now produces a single unified CSV (`surveyor_survey.csv`) plus a `media/` subfolder inside the ZIP, with no separate `notes.csv`, `media.csv`, or `leak_marked.csv` side-car files.
+- CSV header updated to exactly 13 columns: `Surveyor Name, Survey Name, Measurement Name, Ethane (ppm), Methane (ppm), Latitude, Longitude, Timestamp, leak_marked, notes, media_exists, leak_marked_notes, leak_marked_media`.
+- Event-to-row mapping corrected: notes, media, and leak annotations each map to exactly one reading row — the first reading at or after the event timestamp within the same measurement (fallback: closest earlier reading). The previous 60-second tolerance window caused every reading near an event to be flagged; replaced with a single-row assignment using index-based arrays built before CSV rows are written.
+- `leak_marked_notes` and `leak_marked_media` columns added; `leak_marked_media` contains the filename as it appears in the ZIP `media/` folder.
+
+### Changed
+- BLE scan list now filters out consumer devices (phones, tablets, laptops, headphones, watches, keyboards, speakers, TVs) via an allow/block/MAC-address predicate in `_isLikelySensor`. Sensor-named devices (ESP32, SensorX, UART, StaXion, BaXPaX, methane, ethane, gas, Nordic, BLE) are always kept. MAC-address-only entries are hidden. Unknown names pass through conservatively.
+
 ## Unreleased
+
+### Changed
+- **Measurement start flow redesigned into a single unified bottom-sheet** (`lib/widgets/start_measurement_sheet.dart`). The previous two-step flow (first sheet: name + survey, second sheet: expected workload) is replaced by one polished `StartMeasurementSheet` showing all fields together: measurement name, Existing/New Survey toggle, survey dropdown or new-name input, and expected joints/photos/videos. Dark theme with `#1C1C1E` background, `#2C2C2E` card inputs, `#7d0d0d` accent, white text, and radius-12 fields. Footer "Start Recording" button is pinned outside the scroll area and uses `MediaQuery.padding.bottom` safe-area padding so it is never hidden behind the Android system navigation bar. All existing logic (BLE check, validation, storage warning, survey creation, duplicate-name checks, measurement insert) is preserved.
 
 ### Added
 - Pre-measurement workload modal: after survey selection, a required bottom sheet collects **Expected joints to survey**, **Expected photos**, and **Expected videos** before any measurement is created. All three fields accept only positive integers (≥ 1); empty, zero, negative, decimal, and non-numeric inputs are rejected with an inline error. Values are saved with the measurement as `expected_joints`, `expected_photos`, `expected_videos`.

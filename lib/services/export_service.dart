@@ -124,122 +124,13 @@ class ExportService {
     if (await stagingDir.exists()) await stagingDir.delete(recursive: true);
     await stagingDir.create(recursive: true);
 
-    // 4c. Build main survey CSV
-    final mainCsvSb = StringBuffer();
-    mainCsvSb.writeln(
-      'GPS UTC,Measurement Name,Error Code,Methane (ppm),Ethane (ppm),'
-      'Latitude,Longitude,notes,media_exists,leak_marked',
-    );
-    for (final m in measurements) {
-      final readings = readingsMap[m.id!] ?? [];
-      final notesForM = notesMap[m.id!] ?? [];
-      final mediaForM = mediaMap[m.id!] ?? [];
-      final leakForM = leakMap[m.id!] ?? [];
-      final notesJoined = notesForM.map((n) => n.text).join(' | ');
-      final mediaExists = mediaForM.isNotEmpty ? 'yes' : 'no';
-      for (final r in readings) {
-        mainCsvSb.writeln(
-          [
-            _esc(r.gpsUtc),
-            _esc(m.name),
-            r.errorCode.toString(),
-            r.methanePpm.toString(),
-            r.ethanePpm.toString(),
-            r.latitude?.toString() ?? '',
-            r.longitude?.toString() ?? '',
-            _esc(notesJoined),
-            mediaExists,
-            _leakMarkedForRow(r, leakForM),
-          ].join(','),
-        );
-      }
-    }
-    final mainCsvFilename = 'survey_${safeNameLower}_$stamp.csv';
-    await File(
-      p.join(stagingDir.path, mainCsvFilename),
-    ).writeAsString(mainCsvSb.toString());
+    // Create media/ subdirectory
+    final mediaDir = Directory(p.join(stagingDir.path, 'media'));
+    await mediaDir.create(recursive: true);
 
-    // 4d. notes.csv
-    final allNotes = notesMap.values.expand((n) => n).toList();
-    if (allNotes.isNotEmpty) {
-      final notesCsvSb = StringBuffer();
-      notesCsvSb.writeln(
-        'Survey Name,Measurement Name,Timestamp,Latitude,Longitude,Note',
-      );
-      for (final m in measurements) {
-        final notesForM = notesMap[m.id!] ?? [];
-        for (final n in notesForM) {
-          notesCsvSb.writeln(
-            [
-              _esc(survey.name),
-              _esc(m.name),
-              _esc(n.createdAt),
-              '',
-              '',
-              _esc(n.text),
-            ].join(','),
-          );
-        }
-      }
-      await File(
-        p.join(stagingDir.path, 'notes.csv'),
-      ).writeAsString(notesCsvSb.toString());
-    }
-
-    // 4e. media.csv
-    final allMedia = mediaMap.values.expand((mf) => mf).toList();
-    if (allMedia.isNotEmpty) {
-      final mediaCsvSb = StringBuffer();
-      mediaCsvSb.writeln(
-        'Survey Name,Measurement Name,Timestamp,Latitude,Longitude',
-      );
-      for (final m in measurements) {
-        final mediaForM = mediaMap[m.id!] ?? [];
-        for (final mf in mediaForM) {
-          mediaCsvSb.writeln(
-            [
-              _esc(survey.name),
-              _esc(m.name),
-              _esc(mf.timestamp),
-              mf.latitude?.toString() ?? '',
-              mf.longitude?.toString() ?? '',
-            ].join(','),
-          );
-        }
-      }
-      await File(
-        p.join(stagingDir.path, 'media.csv'),
-      ).writeAsString(mediaCsvSb.toString());
-    }
-
-    // 4f. leak_marked.csv
-    final allLeaks = leakMap.values.expand((lk) => lk).toList();
-    if (allLeaks.isNotEmpty) {
-      final leakCsvSb = StringBuffer();
-      leakCsvSb.writeln(
-        'Survey Name,Measurement Name,Timestamp,Latitude,Longitude,Note',
-      );
-      for (final m in measurements) {
-        final leakForM = leakMap[m.id!] ?? [];
-        for (final lm in leakForM) {
-          leakCsvSb.writeln(
-            [
-              _esc(survey.name),
-              _esc(m.name),
-              _esc(lm.timestamp),
-              lm.latitude?.toString() ?? '',
-              lm.longitude?.toString() ?? '',
-              _esc(lm.note ?? ''),
-            ].join(','),
-          );
-        }
-      }
-      await File(
-        p.join(stagingDir.path, 'leak_marked.csv'),
-      ).writeAsString(leakCsvSb.toString());
-    }
-
-    // 4g. Copy media files
+    // Copy media files into media/ and build destNames map
+    // destNames maps source file path -> renamed filename in media/ folder
+    final Map<String, String> destNames = {};
     for (final m in measurements) {
       final mediaForM = mediaMap[m.id!] ?? [];
       final safeMeasName = m.name.replaceAll(RegExp(r'[^A-Za-z0-9]'), '_');
@@ -257,7 +148,8 @@ class ExportService {
         final index = mediaIndex.toString().padLeft(3, '0');
         final destName =
             '${safeSurveyName}_${safeMeasName}_${tsRaw}_${type}_$index.$ext';
-        await srcFile.copy(p.join(stagingDir.path, destName));
+        destNames[mf.path] = destName;
+        await srcFile.copy(p.join(mediaDir.path, destName));
       }
 
       final leakForM = leakMap[m.id!] ?? [];
@@ -278,11 +170,86 @@ class ExportService {
         final index = leakMediaIndex.toString().padLeft(3, '0');
         final destName =
             '${safeSurveyName}_${safeMeasNameLocal}_${tsRaw}_leak_photo_$index.$ext';
-        await srcFile.copy(p.join(stagingDir.path, destName));
+        destNames[lm.mediaPath!] = destName;
+        await srcFile.copy(p.join(mediaDir.path, destName));
       }
     }
 
-    // 4h. Create ZIP and clean up
+    // Build main survey CSV (after media copy so destNames is populated)
+    final mainCsvSb = StringBuffer();
+    mainCsvSb.writeln(
+      'Surveyor Name,Survey Name,Measurement Name,Ethane (ppm),Methane (ppm),'
+      'Latitude,Longitude,Timestamp,leak_marked,notes,media_exists,'
+      'leak_marked_notes,leak_marked_media',
+    );
+    for (final m in measurements) {
+      final readings = readingsMap[m.id!] ?? [];
+      final notesForM = notesMap[m.id!] ?? [];
+      final mediaForM = mediaMap[m.id!] ?? [];
+      final leakForM = leakMap[m.id!] ?? [];
+
+      // Per-row event arrays — default all to empty/no.
+      final leakMarkedArr = List.filled(readings.length, 'no');
+      final notesArr = List.filled(readings.length, '');
+      final mediaExistsArr = List.filled(readings.length, 'no');
+      final leakNotesArr = List.filled(readings.length, '');
+      final leakMediaArr = List.filled(readings.length, '');
+
+      // Map each event to exactly ONE reading row.
+      for (final n in notesForM) {
+        final nTime = DateTime.tryParse(n.createdAt);
+        if (nTime == null || readings.isEmpty) continue;
+        final idx = _findTargetReadingIndex(nTime, readings);
+        notesArr[idx] = _esc(n.text);
+      }
+      for (final mf in mediaForM) {
+        final mTime = DateTime.tryParse(mf.timestamp);
+        if (mTime == null || readings.isEmpty) continue;
+        final idx = _findTargetReadingIndex(mTime, readings);
+        mediaExistsArr[idx] = 'yes';
+      }
+      for (final lm in leakForM) {
+        final lmTime = DateTime.tryParse(lm.timestamp);
+        if (lmTime == null || readings.isEmpty) continue;
+        final idx = _findTargetReadingIndex(lmTime, readings);
+        leakMarkedArr[idx] = 'yes';
+        if (lm.note != null && lm.note!.isNotEmpty) {
+          leakNotesArr[idx] = _esc(lm.note!);
+        }
+        if (lm.mediaPath != null) {
+          leakMediaArr[idx] = _esc(
+            destNames[lm.mediaPath!] ?? p.basename(lm.mediaPath!),
+          );
+        }
+      }
+
+      for (var i = 0; i < readings.length; i++) {
+        final r = readings[i];
+        mainCsvSb.writeln(
+          [
+            _esc(survey.surveyorName),
+            _esc(survey.name),
+            _esc(m.name),
+            r.ethanePpm.toString(),
+            r.methanePpm.toString(),
+            r.latitude?.toString() ?? '',
+            r.longitude?.toString() ?? '',
+            _esc(r.gpsUtc),
+            leakMarkedArr[i],
+            notesArr[i],
+            mediaExistsArr[i],
+            leakNotesArr[i],
+            leakMediaArr[i],
+          ].join(','),
+        );
+      }
+    }
+    final mainCsvFilename = 'survey_${safeNameLower}_$stamp.csv';
+    await File(
+      p.join(stagingDir.path, mainCsvFilename),
+    ).writeAsString(mainCsvSb.toString());
+
+    // Create ZIP and clean up
     final zipFile = File(p.join(tempDir.path, zipFilename));
     await ZipFile.createFromDirectory(
       sourceDir: stagingDir,
@@ -301,21 +268,37 @@ class ExportService {
     return v;
   }
 
-  /// Returns 'yes' if any leak mark occurred within [_leakToleranceSeconds]
-  /// of the reading's GPS UTC timestamp, otherwise 'no'.
-  static const _leakToleranceSeconds = 60;
-
-  static String _leakMarkedForRow(Reading r, List<LeakMark> leaks) {
-    if (leaks.isEmpty) return 'no';
-    final rTime = DateTime.tryParse(r.gpsUtc);
-    if (rTime == null) return 'no';
-    for (final lm in leaks) {
-      final lmTime = DateTime.tryParse(lm.timestamp);
-      if (lmTime == null) continue;
-      if (rTime.difference(lmTime).abs().inSeconds <= _leakToleranceSeconds) {
-        return 'yes';
+  /// Returns the index of the single reading row that an event at [eventTime]
+  /// should be applied to.
+  ///
+  /// Rule: prefer the first reading whose timestamp is >= eventTime (first
+  /// reading that started after the event). If no such reading exists, fall
+  /// back to the closest earlier reading.
+  ///
+  /// Readings must be sorted ascending by timestamp (guaranteed by the DB
+  /// ORDER BY clause in getReadingsForMeasurement).
+  static int _findTargetReadingIndex(
+    DateTime eventTime,
+    List<Reading> readings,
+  ) {
+    // First reading at or after event time.
+    for (var i = 0; i < readings.length; i++) {
+      final rTime = DateTime.tryParse(readings[i].gpsUtc);
+      if (rTime == null) continue;
+      if (!rTime.isBefore(eventTime)) return i;
+    }
+    // No later reading — find closest earlier reading.
+    var bestIdx = 0;
+    var bestDiffMs = 999999999;
+    for (var i = 0; i < readings.length; i++) {
+      final rTime = DateTime.tryParse(readings[i].gpsUtc);
+      if (rTime == null) continue;
+      final diff = eventTime.difference(rTime).inMilliseconds.abs();
+      if (diff < bestDiffMs) {
+        bestDiffMs = diff;
+        bestIdx = i;
       }
     }
-    return 'no';
+    return bestIdx;
   }
 }

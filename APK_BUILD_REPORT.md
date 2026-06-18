@@ -6,27 +6,25 @@ APK_BUILD_DONE
 ## Build Command
 flutter clean
 flutter pub get
-flutter build apk --release
+flutter build apk --debug
 
 ## APK Path
-build/app/outputs/flutter-apk/app-release.apk
-
-## Dist Path
-dist/xsurvey-release-20260616-115435/app-release.apk
+build/app/outputs/flutter-apk/app-debug.apk
 
 ## App Version
 1.0.0+1
 
 ## File Size
-25 MB
+99 MB
 
 ## Timestamp
-2026-06-16 11:54:35 local
+2026-06-18 12:18:48–12:19:11 CEST (~23 seconds)
 
 ## Notes
-- Release build; quality pre-confirmed by orchestrator (QUALITY_PASS).
-- flutter clean + flutter pub get run by orchestrator before handoff; skipped pre-build re-run per handoff instructions.
-- Build completed in ~50 s via Gradle assembleRelease.
-- MaterialIcons font tree-shaken: 1,645,184 -> 5,940 bytes (99.6% reduction).
-- 3 Java compiler warnings: source/target value 8 obsolete options (Xlint); Gradle/AGP toolchain warnings, not project code issues; safe to ignore.
-- Signed with debug keystore (no production signing configured — see project signing status memory).
+- Debug build explicitly requested by orchestrator for GPS path filtering + path rendering + path restore feature verification.
+- APK verified at default output path.
+- Warnings (non-blocking):
+  - Android x86 target support will be removed after Flutter 3.27 stable.
+  - Javac: source/target value 8 obsolete (3 warnings); suppressible with -Xlint:-options.
+  - 85 pub packages have newer versions incompatible with current constraints.
+- No errors. No Dart compilation failures.

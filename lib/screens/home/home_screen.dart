@@ -345,6 +345,30 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> with RouteAware {
 
   /// Returns true if the device is likely an embedded sensor (not a consumer device).
   bool _isLikelySensor(ScanResult r) {
+    final name = r.device.platformName.toLowerCase().trim();
+
+    // Preserve existing behavior: unnamed devices are likely embedded sensors.
+    if (name.isEmpty) return true;
+
+    // Step 1 — ALLOW list: sensor keywords bypass all blocking.
+    const sensorKeywords = [
+      'sensorx',
+      'sensor',
+      'ble',
+      'esp32',
+      'uart',
+      'nordic',
+      'methane',
+      'ethane',
+      'gas',
+      'staxion',
+      'baxpax',
+    ];
+    if (sensorKeywords.any((kw) => name.contains(kw))) return true;
+
+    // Step 2 — BLOCK list: consumer device keywords.
+    // NOTE: bare 'mac' and bare 'pc' are intentionally omitted to avoid
+    // false positives on names like "thermac" or "compact".
     const consumerKeywords = [
       'iphone',
       'ipad',
@@ -352,28 +376,28 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> with RouteAware {
       'mac mini',
       'mac pro',
       'imac',
-      'airpods',
-      'beats',
+      'apple',
+      'android',
       'samsung',
       'galaxy',
       'pixel',
-      'huawei',
       'oneplus',
+      'redmi',
       'xiaomi',
+      'huawei',
       'oppo',
-      'realme',
       'vivo',
-      'honor',
+      'realme',
+      'phone',
+      'tablet',
+      'laptop',
+      'windows',
+      'airpods',
+      'beats',
       'headphones',
+      'headset',
       'earbuds',
-      'earphone',
       'buds',
-      'jbl',
-      'bose',
-      'sony',
-      'jabra',
-      'sennheiser',
-      'skullcandy',
       'watch',
       'band',
       'fitbit',
@@ -381,19 +405,23 @@ class _BLEScannerScreenState extends State<BLEScannerScreen> with RouteAware {
       'keyboard',
       'mouse',
       'trackpad',
-      'tv ',
-      ' tv',
+      'speaker',
       'television',
       'roku',
-      'fire tv',
-      'laptop',
       'thinkpad',
       'surface',
     ];
-    final name = r.device.platformName.toLowerCase().trim();
-    // Keep unnamed devices — likely embedded sensors.
-    if (name.isEmpty) return true;
-    return !consumerKeywords.any((kw) => name.contains(kw));
+    if (consumerKeywords.any((kw) => name.contains(kw))) return false;
+
+    // Step 3 — MAC-address noise filter.
+    final macRegex = RegExp(
+      r'^([0-9a-f]{2}:){5}[0-9a-f]{2}$',
+      caseSensitive: false,
+    );
+    if (macRegex.hasMatch(r.device.platformName)) return false;
+
+    // Step 4 — Conservative fallthrough: non-empty, not blocked, not a MAC.
+    return true;
   }
 
   Future<void> _requestPermissions() async {

@@ -382,7 +382,7 @@ class DatabaseService {
       'readings',
       where: 'measurement_id = ?',
       whereArgs: [measurementId],
-      orderBy: 'id ASC',
+      orderBy: 'gps_utc ASC, id ASC',
     );
     return rows.map(Reading.fromMap).toList();
   }
